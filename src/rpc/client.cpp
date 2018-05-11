@@ -67,6 +67,7 @@ static const CRPCConvertParam vRPCConvertParams[] = {
     {"listaccounts", 1, "include_watchonly"},
     {"walletpassphrase", 1, "timeout"},
     {"getblocktemplate", 0, "template_request"},
+    {"getblocktemplatelight", 0, "template_request"},
     {"listsinceblock", 1, "target_confirmations"},
     {"listsinceblock", 2, "include_watchonly"},
     {"listsinceblock", 3, "include_removed"},
@@ -135,6 +136,10 @@ static const CRPCConvertParam vRPCConvertParams[] = {
     {"echojson", 9, "arg9"},
     {"rescanblockchain", 0, "start_height"},
     {"rescanblockchain", 1, "stop_height"},
+#ifdef ENABLE_WALLET
+    {"fillmempool", 0, "outputcount"},
+#endif
+
 };
 
 class CRPCConvertTable {

@@ -76,6 +76,7 @@ bool TryCreateDirectories(const fs::path &p);
 fs::path GetDefaultDataDir();
 const fs::path &GetDataDir(bool fNetSpecific = true);
 void ClearDatadirCache();
+fs::path GetblocktemplatelightDataDir();
 fs::path GetConfigFile(const std::string &confPath);
 #ifndef WIN32
 fs::path GetPidFile();
