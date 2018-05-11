@@ -58,6 +58,8 @@ static const CRPCConvertParam vRPCConvertParams[] = {
     {"listtransactions", 3, "include_watchonly"},
     {"walletpassphrase", 1, "timeout"},
     {"getblocktemplate", 0, "template_request"},
+    {"getblocktemplatelight", 0, "template_request"},
+    {"getblocktemplatelight", 1, "additional_txs"},
     {"listsinceblock", 1, "target_confirmations"},
     {"listsinceblock", 2, "include_watchonly"},
     {"listsinceblock", 3, "include_removed"},
@@ -163,6 +165,11 @@ static const CRPCConvertParam vRPCConvertParams[] = {
     {"buildavalancheproof", 3, "stakes"},
     // ABC specific RPC
     {"setexcessiveblock", 0, "blockSize"},
+#ifdef ENABLE_WALLET
+    {"fillmempool", 0, "outputcount"},
+    {"fillmempool", 1, "maxtxs"},
+#endif
+
 };
 
 class CRPCConvertTable {

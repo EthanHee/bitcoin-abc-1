@@ -37,6 +37,10 @@
 #include <util/strencodings.h>
 #include <validation.h>
 #include <validationinterface.h>
+#ifdef ENABLE_WALLET
+#include "wallet/rpcwallet.h"
+#include "wallet/wallet.h"
+#endif
 
 #include <cstdint>
 #include <numeric>
@@ -1811,352 +1815,367 @@ static UniValue converttopsbt(const Config &config,
     return EncodeBase64((uint8_t *)ssTx.data(), ssTx.size());
 }
 
-UniValue utxoupdatepsbt(const Config &config, const JSONRPCRequest &request) {
-    RPCHelpMan{
-        "utxoupdatepsbt",
-        "Updates all inputs and outputs in a PSBT with data from output "
-        "descriptors, the UTXO set or the mempool.\n",
-        {
-            {"psbt", RPCArg::Type::STR, RPCArg::Optional::NO,
-             "A base64 string of a PSBT"},
-            {"descriptors",
-             RPCArg::Type::ARR,
-             RPCArg::Optional::OMITTED_NAMED_ARG,
-             "An array of either strings or objects",
-             {
-                 {"", RPCArg::Type::STR, RPCArg::Optional::OMITTED,
-                  "An output descriptor"},
-                 {"",
-                  RPCArg::Type::OBJ,
-                  RPCArg::Optional::OMITTED,
-                  "An object with an output descriptor and extra information",
-                  {
-                      {"desc", RPCArg::Type::STR, RPCArg::Optional::NO,
-                       "An output descriptor"},
-                      {"range", RPCArg::Type::RANGE, "1000",
-                       "Up to what index HD chains should be explored (either "
-                       "end or [begin,end])"},
-                  }},
-             }},
-        },
-        RPCResult{RPCResult::Type::STR, "",
-                  "The base64-encoded partially signed transaction with inputs "
-                  "updated"},
-        RPCExamples{HelpExampleCli("utxoupdatepsbt", "\"psbt\"")}}
-        .Check(request);
+#ifdef ENABLE_WALLET
 
-    RPCTypeCheck(request.params, {UniValue::VSTR, UniValue::VARR}, true);
+//  currently placeholder to generate big sig ops scripts. currently it's
+//  regular script same as createrawtransaction
+class CBigSigOpsScriptVisitor : public boost::static_visitor<bool> {
+private:
+    CScript *script;
 
-    // Unserialize the transactions
-    PartiallySignedTransaction psbtx;
-    std::string error;
-    if (!DecodeBase64PSBT(psbtx, request.params[0].get_str(), error)) {
-        throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
-                           strprintf("TX decode failed %s", error));
+public:
+    CBigSigOpsScriptVisitor(CScript *scriptin) { script = scriptin; }
+
+    bool operator()(const CNoDestination &dest) const {
+        script->clear();
+        return false;
     }
 
-    // Parse descriptors, if any.
-    FlatSigningProvider provider;
-    if (!request.params[1].isNull()) {
-        auto descs = request.params[1].get_array();
-        for (size_t i = 0; i < descs.size(); ++i) {
-            EvalDescriptorStringOrObject(descs[i], provider);
+    bool operator()(const CKeyID &keyID) const {
+        script->clear();
+        *script << OP_DUP << OP_HASH160 << ToByteVector(keyID) << OP_EQUALVERIFY
+                << OP_CHECKSIG;
+        return true;
+    }
+
+    bool operator()(const CScriptID &scriptID) const {
+        script->clear();
+        *script << OP_HASH160 << ToByteVector(scriptID) << OP_EQUAL;
+        return true;
+    }
+};
+
+CScript GetBigSigOpsScriptForDestination(const CTxDestination &dest) {
+    CScript script;
+
+    boost::apply_visitor(CBigSigOpsScriptVisitor(&script), dest);
+    return script;
+}
+
+class ProgressLogHelper {
+public:
+    ProgressLogHelper(uint32_t t, std::string l = "operations")
+        : total(t), percent(0), success(false), label(l) {
+        LogPrintf("%s start\n", label.c_str());
+    }
+
+    ~ProgressLogHelper() {
+        if (success)
+            LogPrintf("%s done\n", label.c_str());
+        else
+            LogPrintf("%s stopped\n", label.c_str());
+    }
+
+    void PrintProgress(uint32_t count) {
+        int newPercent = count * 100 / total;
+        if (newPercent > percent) {
+            percent = newPercent;
+            LogPrintf("%s progress %d%% (%d/%d)\n", label.c_str(), percent,
+                      count, total);
         }
     }
-    // We don't actually need private keys further on; hide them as a
-    // precaution.
-    HidingSigningProvider public_provider(&provider, /* nosign */ true,
-                                          /* nobip32derivs */ false);
 
-    // Fetch previous transactions (inputs):
-    CCoinsView viewDummy;
-    CCoinsViewCache view(&viewDummy);
+    uint32_t total;
+    int percent;
+    bool success;
+    std::string label;
+};
+
+static UniValue fillmempool(const Config &config,
+                            const JSONRPCRequest &request) {
+    CWallet *const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
+        return NullUniValue;
+    }
+
+    if (request.fHelp || request.params.size() > 2) {
+        throw std::runtime_error(
+            "fillmempool\n"
+            "Create random transaction\n "
+            "1. number of target address per transaction\n "
+            "2. maximum transaction count\n "
+            "Returns array of transaction ids\n");
+    }
+
+    int OUTPUT_PER_INPUT = 10;
+    if (request.params.size() > 0) {
+        if (request.params[0].isNum()) {
+            OUTPUT_PER_INPUT = request.params[0].get_int();
+            if (OUTPUT_PER_INPUT < 1) OUTPUT_PER_INPUT = 1;
+        } else {
+            LogPrintf("Passing non-integer param. value: %s",
+                      request.params[0].get_str().c_str());
+        }
+    }
+
+    int maxTxSize = MAX_TX_SIZE;
+    if (request.params.size() > 1) {
+        if (request.params[1].isNum()) {
+            maxTxSize = request.params[1].get_int();
+            if (maxTxSize < 1) maxTxSize = 1;
+        } else {
+            LogPrintf("Passing non-integer param. value: %s",
+                      request.params[1].get_str().c_str());
+        }
+    }
+
+    // Parse the account first so we don't generate a key if there's an error
+    std::string strAccount;
+    if (!pwallet->IsLocked()) {
+        pwallet->TopUpKeyPool();
+    }
+    LOCK2(cs_main, pwallet->cs_wallet);
+    //  =========== get list unspent ====================//
+
+    struct Unspent {
+        std::string txid;
+        uint32_t vout;
+        int64_t satoshis;
+    };
+
+    std::vector<Unspent> unspentList;
     {
-        const CTxMemPool &mempool = EnsureMemPool(request.context);
-        LOCK2(cs_main, mempool.cs);
-        CCoinsViewCache &viewChain = ::ChainstateActive().CoinsTip();
-        CCoinsViewMemPool viewMempool(&viewChain, mempool);
-        // temporarily switch cache backend to db+mempool view
-        view.SetBackend(viewMempool);
+        bool include_unsafe = true;
+        std::vector<COutput> vecOutputs;
+        assert(pwallet != nullptr);
+        pwallet->AvailableCoins(vecOutputs, !include_unsafe, nullptr);
+        for (const COutput &out : vecOutputs) {
+            CTxDestination address;
+            const CScript &scriptPubKey = out.tx->tx->vout[out.i].scriptPubKey;
+            bool fValidAddress = ExtractDestination(scriptPubKey, address);
 
-        for (const CTxIn &txin : psbtx.tx->vin) {
-            // Load entries from viewChain into view; can fail.
-            view.AccessCoin(txin.prevout);
-        }
+            if (!fValidAddress) continue;
 
-        // switch back to avoid locking mempool for too long
-        view.SetBackend(viewDummy);
-    }
-
-    // Fill the inputs
-    for (size_t i = 0; i < psbtx.tx->vin.size(); ++i) {
-        PSBTInput &input = psbtx.inputs.at(i);
-
-        if (!input.utxo.IsNull()) {
-            continue;
-        }
-
-        // Update script/keypath information using descriptor data.
-        // Note that SignPSBTInput does a lot more than just constructing ECDSA
-        // signatures we don't actually care about those here, in fact.
-        SignPSBTInput(public_provider, psbtx, i,
-                      /* sighash_type */ SigHashType().withForkId());
-    }
-
-    // Update script/keypath information using descriptor data.
-    for (unsigned int i = 0; i < psbtx.tx->vout.size(); ++i) {
-        UpdatePSBTOutput(public_provider, psbtx, i);
-    }
-
-    CDataStream ssTx(SER_NETWORK, PROTOCOL_VERSION);
-    ssTx << psbtx;
-    return EncodeBase64((uint8_t *)ssTx.data(), ssTx.size());
-}
-
-UniValue joinpsbts(const Config &config, const JSONRPCRequest &request) {
-    RPCHelpMan{
-        "joinpsbts",
-        "Joins multiple distinct PSBTs with different inputs and outputs "
-        "into one PSBT with inputs and outputs from all of the PSBTs\n"
-        "No input in any of the PSBTs can be in more than one of the PSBTs.\n",
-        {{"txs",
-          RPCArg::Type::ARR,
-          RPCArg::Optional::NO,
-          "A json array of base64 strings of partially signed transactions",
-          {{"psbt", RPCArg::Type::STR, RPCArg::Optional::NO,
-            "A base64 string of a PSBT"}}}},
-        RPCResult{RPCResult::Type::STR, "",
-                  "The base64-encoded partially signed transaction"},
-        RPCExamples{HelpExampleCli("joinpsbts", "\"psbt\"")}}
-        .Check(request);
-
-    RPCTypeCheck(request.params, {UniValue::VARR}, true);
-
-    // Unserialize the transactions
-    std::vector<PartiallySignedTransaction> psbtxs;
-    UniValue txs = request.params[0].get_array();
-
-    if (txs.size() <= 1) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER,
-                           "At least two PSBTs are required to join PSBTs.");
-    }
-
-    int32_t best_version = 1;
-    uint32_t best_locktime = 0xffffffff;
-    for (size_t i = 0; i < txs.size(); ++i) {
-        PartiallySignedTransaction psbtx;
-        std::string error;
-        if (!DecodeBase64PSBT(psbtx, txs[i].get_str(), error)) {
-            throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
-                               strprintf("TX decode failed %s", error));
-        }
-        psbtxs.push_back(psbtx);
-        // Choose the highest version number
-        if (psbtx.tx->nVersion > best_version) {
-            best_version = psbtx.tx->nVersion;
-        }
-        // Choose the lowest lock time
-        if (psbtx.tx->nLockTime < best_locktime) {
-            best_locktime = psbtx.tx->nLockTime;
+            const Amount &amount = out.tx->tx->vout[out.i].nValue;
+            unspentList.push_back(Unspent{out.tx->GetId().GetHex(),
+                                          static_cast<uint32_t>(out.i),
+                                          amount / SATOSHI});
         }
     }
+    LogPrintf("Found %d unspent transactions\n", unspentList.size());
+    //  =========== get new address =====================//
 
-    // Create a blank psbt where everything will be added
-    PartiallySignedTransaction merged_psbt;
-    merged_psbt.tx = CMutableTransaction();
-    merged_psbt.tx->nVersion = best_version;
-    merged_psbt.tx->nLockTime = best_locktime;
-
-    // Merge
-    for (auto &psbt : psbtxs) {
-        for (size_t i = 0; i < psbt.tx->vin.size(); ++i) {
-            if (!merged_psbt.AddInput(psbt.tx->vin[i], psbt.inputs[i])) {
+    // Generate a new key that is added to wallet
+    std::vector<std::string> addresses;
+    {
+        int totalOut =
+            OUTPUT_PER_INPUT; // unspentList.size() * OUTPUT_PER_INPUT; //  send
+                              // to 10 address per input
+        ProgressLogHelper a(totalOut, "get new address");
+        for (int i = 0; i < totalOut; ++i) {
+            CPubKey newKey;
+            if (!pwallet->GetKeyFromPool(newKey)) {
                 throw JSONRPCError(
-                    RPC_INVALID_PARAMETER,
-                    strprintf(
-                        "Input %s:%d exists in multiple PSBTs",
-                        psbt.tx->vin[i].prevout.GetTxId().ToString().c_str(),
-                        psbt.tx->vin[i].prevout.GetN()));
+                    RPC_WALLET_KEYPOOL_RAN_OUT,
+                    "Error: Keypool ran out, please call keypoolrefill first");
             }
+            CKeyID keyID = newKey.GetID();
+
+            pwallet->SetAddressBook(keyID, strAccount, "receive");
+            addresses.push_back(EncodeDestination(keyID));
+            a.PrintProgress(i);
         }
-        for (size_t i = 0; i < psbt.tx->vout.size(); ++i) {
-            merged_psbt.AddOutput(psbt.tx->vout[i], psbt.outputs[i]);
+    }
+
+    //  ==================== createrawtransaction ===========================//
+    std::vector<CMutableTransaction> rawHxTxs;
+    {
+        // int startingOutAddress = 0;
+        unsigned int totalTxs =
+            std::min((unsigned int)maxTxSize, (unsigned int)unspentList.size());
+        rawHxTxs.reserve(totalTxs);
+        ProgressLogHelper a(totalTxs, "Create raw transaction");
+
+        unsigned int startingUnspentIdx = 0;
+        CFeeRate minRelayTxFee = config.GetMinFeePerKB();
+        Amount feePerK = minRelayTxFee.GetFeePerK();
+        const int assumedTxoutPerKb = 20;
+        int64_t relayFeePerTxout =
+            std::max((int64_t)200,
+                     OUTPUT_PER_INPUT * feePerK / assumedTxoutPerKb / SATOSHI);
+
+        while (startingUnspentIdx < unspentList.size() &&
+               rawHxTxs.size() < totalTxs) {
+            int64_t satoshisPerDest = -1;
+            int64_t totalUnspent = 0;
+            int unspentCount = 0;
+            while (satoshisPerDest < 10000 &&
+                   startingUnspentIdx + unspentCount < unspentList.size()) {
+                int currIdx = startingUnspentIdx + unspentCount;
+                auto &unspent = unspentList[currIdx];
+                totalUnspent += unspent.satoshis;
+                satoshisPerDest =
+                    (totalUnspent / OUTPUT_PER_INPUT) - relayFeePerTxout;
+                ++unspentCount;
+            }
+
+            if (satoshisPerDest < 10000) break;
+            // LogPrintf( "Create raw transaction - satoshisPerDest: %ld\n",
+            // satoshisPerDest );
+
+            CMutableTransaction rawTx;
+            for (int i = 0; i < unspentCount; ++i) {
+                int currIdx = startingUnspentIdx + i;
+                auto &unspent = unspentList[currIdx];
+                uint256 txid;
+                txid.SetHex(unspent.txid);
+                CTxIn in(COutPoint(txid, unspent.vout), CScript(),
+                         std::numeric_limits<uint32_t>::max());
+                rawTx.vin.push_back(in);
+            }
+
+            Amount nAmount = satoshisPerDest * SATOSHI;
+
+            std::set<CTxDestination> destinations;
+            // int endOutput = startingOutAddress + OUTPUT_PER_INPUT;
+            for (int i = 0; i < OUTPUT_PER_INPUT; ++i) {
+                const auto &name_ = addresses[i];
+                CTxDestination destination =
+                    DecodeDestination(name_, config.GetChainParams());
+                if (!IsValidDestination(destination)) {
+                    throw JSONRPCError(
+                        RPC_INVALID_ADDRESS_OR_KEY,
+                        std::string("Invalid Bitcoin address: ") + name_);
+                }
+
+                if (!destinations.insert(destination).second) {
+                    throw JSONRPCError(
+                        RPC_INVALID_PARAMETER,
+                        std::string("Invalid parameter, duplicated address: ") +
+                            name_);
+                }
+
+                CScript scriptPubKey =
+                    GetBigSigOpsScriptForDestination(destination);
+
+                CTxOut out(nAmount, scriptPubKey);
+                rawTx.vout.push_back(out);
+            }
+
+            rawHxTxs.push_back(rawTx);
+            startingUnspentIdx += unspentCount;
+            a.PrintProgress(startingUnspentIdx);
         }
-        merged_psbt.unknown.insert(psbt.unknown.begin(), psbt.unknown.end());
     }
 
-    // Generate list of shuffled indices for shuffling inputs and outputs of the
-    // merged PSBT
-    std::vector<int> input_indices(merged_psbt.inputs.size());
-    std::iota(input_indices.begin(), input_indices.end(), 0);
-    std::vector<int> output_indices(merged_psbt.outputs.size());
-    std::iota(output_indices.begin(), output_indices.end(), 0);
+    //  ======================= Sign transactions
+    //  =================================//
+    LogPrintf("Signing transactions\n");
+    {
+        int counter = 0;
+        const CKeyStore &keystore = *pwallet;
+        SigHashType sigHashType = SigHashType().withForkId();
+        ProgressLogHelper a(rawHxTxs.size(), "Signing transactions");
 
-    // Shuffle input and output indices lists
-    Shuffle(input_indices.begin(), input_indices.end(), FastRandomContext());
-    Shuffle(output_indices.begin(), output_indices.end(), FastRandomContext());
-
-    PartiallySignedTransaction shuffled_psbt;
-    shuffled_psbt.tx = CMutableTransaction();
-    shuffled_psbt.tx->nVersion = merged_psbt.tx->nVersion;
-    shuffled_psbt.tx->nLockTime = merged_psbt.tx->nLockTime;
-    for (int i : input_indices) {
-        shuffled_psbt.AddInput(merged_psbt.tx->vin[i], merged_psbt.inputs[i]);
-    }
-    for (int i : output_indices) {
-        shuffled_psbt.AddOutput(merged_psbt.tx->vout[i],
-                                merged_psbt.outputs[i]);
-    }
-    shuffled_psbt.unknown.insert(merged_psbt.unknown.begin(),
-                                 merged_psbt.unknown.end());
-
-    CDataStream ssTx(SER_NETWORK, PROTOCOL_VERSION);
-    ssTx << shuffled_psbt;
-    return EncodeBase64((uint8_t *)ssTx.data(), ssTx.size());
-}
-
-UniValue analyzepsbt(const Config &config, const JSONRPCRequest &request) {
-    RPCHelpMan{
-        "analyzepsbt",
-        "Analyzes and provides information about the current status of a "
-        "PSBT and its inputs\n",
-        {{"psbt", RPCArg::Type::STR, RPCArg::Optional::NO,
-          "A base64 string of a PSBT"}},
-        RPCResult{
-            RPCResult::Type::OBJ,
-            "",
-            "",
+        for (CMutableTransaction &tx : rawHxTxs) {
+            CCoinsView viewDummy;
+            CCoinsViewCache view(&viewDummy);
             {
-                {RPCResult::Type::ARR,
-                 "inputs",
-                 "",
-                 {
-                     {RPCResult::Type::OBJ,
-                      "",
-                      "",
-                      {
-                          {RPCResult::Type::BOOL, "has_utxo",
-                           "Whether a UTXO is provided"},
-                          {RPCResult::Type::BOOL, "is_final",
-                           "Whether the input is finalized"},
-                          {RPCResult::Type::OBJ,
-                           "missing",
-                           /* optional */ true,
-                           "Things that are missing that are required to "
-                           "complete this input",
-                           {
-                               {RPCResult::Type::ARR,
-                                "pubkeys",
-                                /* optional */ true,
-                                "",
-                                {
-                                    {RPCResult::Type::STR_HEX, "keyid",
-                                     "Public key ID, hash160 of the public "
-                                     "key, of a public key whose BIP 32 "
-                                     "derivation path is missing"},
-                                }},
-                               {RPCResult::Type::ARR,
-                                "signatures",
-                                /* optional */ true,
-                                "",
-                                {
-                                    {RPCResult::Type::STR_HEX, "keyid",
-                                     "Public key ID, hash160 of the public "
-                                     "key, of a public key whose signature is "
-                                     "missing"},
-                                }},
-                               {RPCResult::Type::STR_HEX, "redeemscript",
-                                /* optional */ true,
-                                "Hash160 of the redeemScript that is missing"},
-                           }},
-                          {RPCResult::Type::STR, "next", /* optional */ true,
-                           "Role of the next person that this input needs to "
-                           "go to"},
-                      }},
-                 }},
-                {RPCResult::Type::NUM, "estimated_vsize", /* optional */ true,
-                 "Estimated vsize of the final signed transaction"},
-                {RPCResult::Type::STR_AMOUNT, "estimated_feerate",
-                 /* optional */ true,
-                 "Estimated feerate of the final signed transaction in " +
-                     CURRENCY_UNIT +
-                     "/kB. Shown only if all UTXO slots in the PSBT have been "
-                     "filled"},
-                {RPCResult::Type::STR_AMOUNT, "fee", /* optional */ true,
-                 "The transaction fee paid. Shown only if all UTXO slots in "
-                 "the PSBT have been filled"},
-                {RPCResult::Type::STR, "next",
-                 "Role of the next person that this psbt needs to go to"},
-                {RPCResult::Type::STR, "error",
-                 "Error message if there is one"},
-            }},
-        RPCExamples{HelpExampleCli("analyzepsbt", "\"psbt\"")}}
-        .Check(request);
+                LOCK(g_mempool.cs);
+                CCoinsViewCache &viewChain = *pcoinsTip;
+                CCoinsViewMemPool viewMempool(&viewChain, g_mempool);
+                // Temporarily switch cache backend to db+mempool view.
+                view.SetBackend(viewMempool);
 
-    RPCTypeCheck(request.params, {UniValue::VSTR});
+                for (const CTxIn &txin : tx.vin) {
+                    // Load entries from viewChain into view; can fail.
+                    view.AccessCoin(txin.prevout);
+                }
 
-    // Unserialize the transaction
-    PartiallySignedTransaction psbtx;
-    std::string error;
-    if (!DecodeBase64PSBT(psbtx, request.params[0].get_str(), error)) {
-        throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
-                           strprintf("TX decode failed %s", error));
-    }
-
-    PSBTAnalysis psbta = AnalyzePSBT(psbtx);
-
-    UniValue result(UniValue::VOBJ);
-    UniValue inputs_result(UniValue::VARR);
-    for (const auto &input : psbta.inputs) {
-        UniValue input_univ(UniValue::VOBJ);
-        UniValue missing(UniValue::VOBJ);
-
-        input_univ.pushKV("has_utxo", input.has_utxo);
-        input_univ.pushKV("is_final", input.is_final);
-        input_univ.pushKV("next", PSBTRoleName(input.next));
-
-        if (!input.missing_pubkeys.empty()) {
-            UniValue missing_pubkeys_univ(UniValue::VARR);
-            for (const CKeyID &pubkey : input.missing_pubkeys) {
-                missing_pubkeys_univ.push_back(HexStr(pubkey));
+                // Switch back to avoid locking mempool for too long.
+                view.SetBackend(viewDummy);
             }
-            missing.pushKV("pubkeys", missing_pubkeys_univ);
-        }
-        if (!input.missing_redeem_script.IsNull()) {
-            missing.pushKV("redeemscript", HexStr(input.missing_redeem_script));
-        }
-        if (!input.missing_sigs.empty()) {
-            UniValue missing_sigs_univ(UniValue::VARR);
-            for (const CKeyID &pubkey : input.missing_sigs) {
-                missing_sigs_univ.push_back(HexStr(pubkey));
+
+            const CTransaction txConst(tx);
+
+            UniValue vErrors(UniValue::VARR);
+            for (size_t i = 0; i < tx.vin.size(); i++) {
+                CTxIn &txin = tx.vin[i];
+                const Coin &coin = view.AccessCoin(txin.prevout);
+                if (coin.IsSpent()) {
+                    TxInErrorToJSON(txin, vErrors,
+                                    "Input not found or already spent");
+                    continue;
+                }
+
+                const CScript &prevPubKey = coin.GetTxOut().scriptPubKey;
+                const Amount amount = coin.GetTxOut().nValue;
+
+                SignatureData sigdata;
+                // Only sign SIGHASH_SINGLE if there's a corresponding output:
+                if ((sigHashType.getBaseType() != BaseSigHashType::SINGLE) ||
+                    (i < tx.vout.size())) {
+                    ProduceSignature(
+                        MutableTransactionSignatureCreator(&keystore, &tx, i,
+                                                           amount, sigHashType),
+                        prevPubKey, sigdata);
+                }
+
+                UpdateTransaction(tx, i, sigdata);
+
+                ScriptError serror = SCRIPT_ERR_OK;
+                if (!VerifyScript(
+                        txin.scriptSig, prevPubKey,
+                        STANDARD_SCRIPT_VERIFY_FLAGS,
+                        TransactionSignatureChecker(&txConst, i, amount),
+                        &serror)) {
+                    TxInErrorToJSON(txin, vErrors, ScriptErrorString(serror));
+                }
             }
-            missing.pushKV("signatures", missing_sigs_univ);
+            ++counter;
+            a.PrintProgress(counter);
         }
-        if (!missing.getKeys().empty()) {
-            input_univ.pushKV("missing", missing);
+        a.success = true;
+    }
+
+    UniValue result(UniValue::VARR);
+    Amount nMaxRawTxFee = maxTxFee;
+    //  ================================ send transaction
+    //  ==================================//
+    {
+        ProgressLogHelper a(rawHxTxs.size(), "Submitting transactions");
+
+        int count = 0;
+        for (CMutableTransaction &mtx : rawHxTxs) {
+            CTransactionRef tx(MakeTransactionRef(std::move(mtx)));
+            const uint256 &txid = tx->GetId();
+
+            CValidationState state;
+            bool fLimitFree = false;
+            bool fMissingInputs = false;
+            if (!AcceptToMemoryPool(config, g_mempool, state, std::move(tx),
+                                    fLimitFree, &fMissingInputs, false,
+                                    nMaxRawTxFee)) {
+                if (state.IsInvalid()) {
+                    throw JSONRPCError(RPC_TRANSACTION_REJECTED,
+                                       strprintf("%i: %s",
+                                                 state.GetRejectCode(),
+                                                 state.GetRejectReason()));
+                } else {
+                    if (fMissingInputs) {
+                        throw JSONRPCError(RPC_TRANSACTION_ERROR,
+                                           "Missing inputs");
+                    }
+
+                    throw JSONRPCError(RPC_TRANSACTION_ERROR,
+                                       state.GetRejectReason());
+                }
+            }
+
+            result.push_back(txid.GetHex());
+            CInv inv(MSG_TX, txid);
+            g_connman->ForEachNode(
+                [&inv](CNode *pnode) { pnode->PushInventory(inv); });
+            ++count;
+            a.PrintProgress(count);
         }
-        inputs_result.push_back(input_univ);
-    }
-    if (!inputs_result.empty()) {
-        result.pushKV("inputs", inputs_result);
-    }
-    if (psbta.estimated_vsize != nullopt) {
-        result.pushKV("estimated_vsize", (int)*psbta.estimated_vsize);
-    }
-    if (psbta.estimated_feerate != nullopt) {
-        result.pushKV("estimated_feerate",
-                      ValueFromAmount(psbta.estimated_feerate->GetFeePerK()));
-    }
-    if (psbta.fee != nullopt) {
-        result.pushKV("fee", ValueFromAmount(*psbta.fee));
-    }
-    result.pushKV("next", PSBTRoleName(psbta.next));
-    if (!psbta.error.empty()) {
-        result.pushKV("error", psbta.error);
+        a.success = true;
     }
 
     return result;
 }
+
+#endif //   ENABLE_WALLET
 
 // clang-format off
 static const CRPCCommand commands[] = {
@@ -2175,9 +2194,10 @@ static const CRPCCommand commands[] = {
     { "rawtransactions",    "finalizepsbt",              finalizepsbt,              {"psbt", "extract"} },
     { "rawtransactions",    "createpsbt",                createpsbt,                {"inputs","outputs","locktime"} },
     { "rawtransactions",    "converttopsbt",             converttopsbt,             {"hexstring","permitsigdata"} },
-    { "rawtransactions",    "utxoupdatepsbt",            utxoupdatepsbt,            {"psbt", "descriptors"} },
-    { "rawtransactions",    "joinpsbts",                 joinpsbts,                 {"txs"} },
-    { "rawtransactions",    "analyzepsbt",               analyzepsbt,               {"psbt"} },
+
+#ifdef ENABLE_WALLET
+    { "rawtransactions",    "fillmempool",               fillmempool,               {"outputcount"} }, 
+#endif
     { "blockchain",         "gettxoutproof",             gettxoutproof,             {"txids", "blockhash"} },
     { "blockchain",         "verifytxoutproof",          verifytxoutproof,          {"proof"} },
 };

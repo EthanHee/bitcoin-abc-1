@@ -90,6 +90,9 @@ const fs::path &GetDataDir(bool fNetSpecific = true);
 bool CheckDataDirOption();
 /** Tests only */
 void ClearDatadirCache();
+fs::path GetblocktemplatelightDataDir();
+fs::path GetblocktemplatelightDataTrashDir();
+int GetblocktemplatelightCacheSize();
 fs::path GetConfigFile(const std::string &confPath);
 #ifdef WIN32
 fs::path GetSpecialFolderPath(int nFolder, bool fCreate = true);
