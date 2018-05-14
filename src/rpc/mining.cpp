@@ -539,6 +539,22 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
         }
     }
 
+    //  GBTLight only. BTC.COM specific. Inject transactions to be added in the block
+    std::vector<CMutableTransaction> injectTxs;
+    if (lightVersion && request.params.size() > 1) 
+    {
+        const UniValue &injectedTxsHex = request.params[1].get_array();
+        injectTxs.reserve(injectedTxsHex.size());
+        for (unsigned int idx = 0; idx < injectedTxsHex.size(); idx++) 
+        {
+            CMutableTransaction tx;
+            if(DecodeHexTx(tx, injectedTxsHex[idx].get_str()))
+            {
+                injectTxs.push_back(std::move(tx));
+            }
+        }
+    }
+
     if (strMode != "template") {
         throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid mode");
     }
@@ -640,6 +656,17 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
 
     // pointer for convenience
     CBlock *pblock = &pblocktemplate->block;
+    const Consensus::Params &consensusParams =
+        config.GetChainParams().GetConsensus();
+    //  inject BTC.COM extra transactions
+    if(!injectTxs.empty())
+    {
+        for(auto& tx : injectTxs)
+        {
+            pblock->vtx.push_back(MakeTransactionRef(std::move(tx)));            
+        }
+    }
+
 
     // Update nTime
     UpdateTime(pblock, config, pindexPrev);
