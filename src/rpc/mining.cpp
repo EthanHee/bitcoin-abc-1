@@ -370,7 +370,8 @@ static void makeMerkleBranch(const std::vector<uint256> &vtxhashs, std::vector<u
 
 static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
                                  const JSONRPCRequest &request) {
-    if (request.fHelp || request.params.size() > 1) {
+    bool wrongParamSize = lightVersion ? request.params.size() > 2 : request.params.size() > 1;
+    if (request.fHelp || wrongParamSize) {
         throw std::runtime_error(
             "getblocktemplate ( TemplateRequest )\n"
             "\nIf the request parameters include a 'mode' key, that is used to "

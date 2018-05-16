@@ -68,6 +68,7 @@ static const CRPCConvertParam vRPCConvertParams[] = {
     {"walletpassphrase", 1, "timeout"},
     {"getblocktemplate", 0, "template_request"},
     {"getblocktemplatelight", 0, "template_request"},
+    {"getblocktemplatelight", 1, "additional_txs"},
     {"listsinceblock", 1, "target_confirmations"},
     {"listsinceblock", 2, "include_watchonly"},
     {"listsinceblock", 3, "include_removed"},
