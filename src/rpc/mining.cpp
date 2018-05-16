@@ -369,7 +369,8 @@ static void makeMerkleBranch(const std::vector<uint256> &vtxhashs, std::vector<u
 
 static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
                                  const JSONRPCRequest &request) {
-    if (request.fHelp || request.params.size() > 1) {
+    bool wrongParamSize = lightVersion ? request.params.size() > 2 : request.params.size() > 1;
+    if (request.fHelp || wrongParamSize) {
         throw std::runtime_error(
             "getblocktemplate ( TemplateRequest )\n"
             "\nIf the request parameters include a 'mode' key, that is used to "
@@ -1065,7 +1066,7 @@ static const ContextFreeRPCCommand commands[] = {
     {"mining",     "getmininginfo",         getmininginfo,         true, {}},
     {"mining",     "prioritisetransaction", prioritisetransaction, true, {"txid", "priority_delta", "fee_delta"}},
     {"mining",     "getblocktemplate",      getblocktemplate,      true, {"template_request"}},
-    {"mining",     "getblocktemplatelight", getblocktemplatelight, true, {"template_request"}},
+    {"mining",     "getblocktemplatelight", getblocktemplatelight, true, {"template_request", "additional_txs"}},
     {"mining",     "submitblock",           submitblock,           true, {"hexdata", "parameters"}},
     {"mining",     "submitblocklight",      submitblocklight,      true, {"hexdata", "job_id", "parameters"}},
 
