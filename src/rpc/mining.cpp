@@ -35,6 +35,10 @@
 
 #include <fs.h>
 
+std::unordered_map<std::string, std::vector<CTransactionRef>> gGetblocktemplatelightCacheMap;   //  keep the transactions based on the job_id
+std::vector<std::string> gGetblocktemplatelightIdList;  //  keep the job_id order
+CCriticalSection cs_getblocktemplatelight;
+
 /**
  * Return average network hashes per second based on the last 'lookup' blocks,
  * or from the last difficulty change if 'lookup' is nonpositive. If 'height' is
@@ -798,25 +802,56 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
 
     if(lightVersion)
     {
-        CDataStream datastream(SER_DISK, PROTOCOL_VERSION);
-
-        datastream << totalTxNoCoinbase;
-        for (const auto &it : pblock->vtx) {
-            const CTransaction &tx = *it;
-
-            if (tx.IsCoinBase()) {
-                continue;
+        if(pblock->vtx.size() > 0)
+        {
+            if (pblock->vtx[0]->IsCoinBase()) {
+                pblock->vtx.erase(pblock->vtx.begin());
             }
+        }
 
-            datastream << tx;
+        const std::string jobIdStr = jobId.GetHex();
+        {
+            LOCK(cs_getblocktemplatelight);
+            if((int)gGetblocktemplatelightCacheMap.size() >= GetblocktemplatelightCacheSize()) //  limit the total cache
+            {
+                //  remove the oldest block
+                auto removeJobIdIter = gGetblocktemplatelightIdList.begin();
+                if(jobIdStr != *removeJobIdIter)
+                {
+                    LogPrintf("Cache size exceeded. cache for job_id %s removed\n", (*removeJobIdIter).c_str());
+                    //  if the oldest block not the same as the latest block, then erase.
+                    gGetblocktemplatelightCacheMap.erase(*removeJobIdIter);
+                }
+                gGetblocktemplatelightIdList.erase(removeJobIdIter);
+            }
+            gGetblocktemplatelightIdList.push_back(jobIdStr);
+            gGetblocktemplatelightCacheMap[jobIdStr] = std::move(pblock->vtx);
         }
 
         fs::path outputFile = GetblocktemplatelightDataDir();
-        outputFile += jobId.GetHex();
-        fs::ofstream ofile(outputFile);
-        ofile << "GBT";
-        ofile.write(datastream.data(), datastream.size());//transactions.write(4);
-        ofile << "GBT";        
+        outputFile += jobIdStr;
+        if(!fs::exists(outputFile))
+        {
+            CDataStream datastream(SER_DISK, PROTOCOL_VERSION);
+
+            datastream << totalTxNoCoinbase;
+            for (const auto &it : pblock->vtx) {
+                const CTransaction &tx = *it;
+                datastream << tx;
+            }
+
+            fs::ofstream ofile(outputFile);
+            if(ofile.is_open())
+            {
+                ofile << "GBT";
+                ofile.write(datastream.data(), datastream.size());
+                ofile << "GBT";
+            }
+            else
+            {
+                LogPrintf("getblocktemplatelight cannot write tx data to %s", outputFile.string().c_str());
+            }
+        }
     }
 
     return result;
@@ -876,35 +911,57 @@ static UniValue submitblockcommon(const std::string& jobId, const Config &config
             throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
                             "Block does not only contain a coinbase (light version)");
         }
-
-        fs::path filename = GetblocktemplatelightDataDir();
-        filename += jobId;
-        std::vector<char> dataBuff;
+        bool loadFile = true;
         {
-            fs::ifstream file(filename);
-            if(!file.is_open())
+            LOCK(cs_getblocktemplatelight);
+            auto iter = gGetblocktemplatelightCacheMap.find(jobId);
+            if(iter != gGetblocktemplatelightCacheMap.end())
             {
-                return "job_id data not available";
+                auto& vtx = iter->second;
+                block.vtx.insert(block.vtx.end(), vtx.begin(), vtx.end());
+                loadFile = false;
             }
-            file.seekg(0, file.end);
-            int64_t fileSize = (int64_t)file.tellg();
-            auto dataSize = fileSize - 6; // 6 from prefix GBT (3) and postfix GBT (3)
-            if(dataSize <= 0)
-            {
-                return "job_id data is empty";
-            }
-            file.seekg(3, file.beg);
-            dataBuff.resize(dataSize);
-            file.read(dataBuff.data(), dataSize);
         }
-        CDataStream c(dataBuff, SER_DISK, PROTOCOL_VERSION);
-        uint32_t txCount = 0;
-        c >> txCount;
-        for(uint32_t i = 0; i < txCount; ++i)
+        
+        if(loadFile)
         {
-            CMutableTransaction mutableTx;
-            c >> mutableTx;
-            block.vtx.push_back(MakeTransactionRef(std::move(mutableTx)));
+            LogPrintf("SubmitBlockLight job_id %s not found in mem cache. Searching from file.\n", jobId.c_str());
+            fs::path filename = GetblocktemplatelightDataDir();
+            filename += jobId;
+            if(!fs::exists(filename))
+            {
+                LogPrintf("[WARNING] SubmitBlockLight cannot find file %s. Searching trash dir.\n", jobId.c_str());
+                filename = GetblocktemplatelightDataTrashDir();
+                filename += jobId;
+            }
+            LogPrintf("SubmitBlockLight job_id %s found in %s.\n", jobId.c_str(), filename.string().c_str());
+            std::vector<char> dataBuff;
+            {
+                fs::ifstream file(filename);
+                if(!file.is_open())
+                {
+                    return "job_id data not available";
+                }
+                file.seekg(0, file.end);
+                int64_t fileSize = (int64_t)file.tellg();
+                auto dataSize = fileSize - 6; // 6 from prefix GBT (3) and postfix GBT (3)
+                if(dataSize <= 0)
+                {
+                    return "job_id data is empty";
+                }
+                file.seekg(3, file.beg);
+                dataBuff.resize(dataSize);
+                file.read(dataBuff.data(), dataSize);
+            }
+            CDataStream c(dataBuff, SER_DISK, PROTOCOL_VERSION);
+            uint32_t txCount = 0;
+            c >> txCount;
+            for(uint32_t i = 0; i < txCount; ++i)
+            {
+                CMutableTransaction mutableTx;
+                c >> mutableTx;
+                block.vtx.push_back(MakeTransactionRef(std::move(mutableTx)));
+            }
         }
         timeSerializeTx = GetTimeMicros() - submitblockStart;
        
@@ -955,7 +1012,10 @@ static UniValue submitblockcommon(const std::string& jobId, const Config &config
 
     int64_t submitblockEnd = GetTimeMicros();
     auto timeLen = submitblockEnd - submitblockStart;
-    LogPrintf("SubmitBlock serialize txs from file duration is %f seconds\n", (float)timeSerializeTx * 0.000001f);
+    if(!jobId.empty())
+    {
+        LogPrintf("SubmitBlockLight serialize txs for job_id %s duration is %f seconds\n", jobId.c_str(), (float)timeSerializeTx * 0.000001f);
+    }
     LogPrintf("SubmitBlock duration is %f seconds\n", (float)timeLen * 0.000001f);
 
     return result;
