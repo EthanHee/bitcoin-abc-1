@@ -130,6 +130,7 @@ static const CRPCConvertParam vRPCConvertParams[] = {
     {"echojson", 9, "arg9"},
 #ifdef ENABLE_WALLET
     {"fillmempool", 0, "outputcount"},
+    {"fillmempool", 1, "maxtxs"},
 #endif
 
 };
