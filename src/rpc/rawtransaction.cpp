@@ -1371,11 +1371,12 @@ static UniValue fillmempool(const Config &config,
         return NullUniValue;
     }
 
-    if (request.fHelp || request.params.size() > 1) {
+    if (request.fHelp || request.params.size() > 2) {
         throw std::runtime_error(
             "fillmempool\n"
             "Create random transaction\n "
             "1. number of target address per transaction\n "
+            "2. maximum transaction count\n "
             "Returns array of transaction ids\n");
     }
 
@@ -1391,6 +1392,21 @@ static UniValue fillmempool(const Config &config,
         {
             LogPrintf("Passing non-integer param. value: %s", request.params[0].get_str().c_str());
         }
+    }
+
+    int MAX_TX_SIZE = 10000000;
+    if(request.params.size() > 1)
+    {
+        if(request.params[1].isNum())
+        {
+            MAX_TX_SIZE = request.params[1].get_int();
+            if(MAX_TX_SIZE < 1)
+                MAX_TX_SIZE = 1;
+        }
+        else
+        {
+            LogPrintf("Passing non-integer param. value: %s", request.params[1].get_str().c_str());
+        }        
     }
     
     // Parse the account first so we don't generate a key if there's an error
@@ -1456,8 +1472,9 @@ static UniValue fillmempool(const Config &config,
     std::vector<CMutableTransaction> rawHxTxs;
     {
         // int startingOutAddress = 0;
-        rawHxTxs.reserve(unspentList.size());
-        ProgressLogHelper a(unspentList.size(), "Create raw transaction");
+        unsigned int totalTxs = std::min((unsigned int)MAX_TX_SIZE, (unsigned int)unspentList.size());
+        rawHxTxs.reserve(totalTxs);
+        ProgressLogHelper a(totalTxs, "Create raw transaction");
 
         unsigned int startingUnspentIdx = 0;
         CFeeRate minRelayTxFee = config.GetMinFeePerKB();
@@ -1465,7 +1482,7 @@ static UniValue fillmempool(const Config &config,
         const int assumedTxoutPerKb = 20;
         int64_t relayFeePerTxout = std::max((int64_t)200, OUTPUT_PER_INPUT * feePerK  / SATOSHI / assumedTxoutPerKb);
 
-        while(startingUnspentIdx < unspentList.size())
+        while(startingUnspentIdx < unspentList.size() && rawHxTxs.size() < totalTxs)
         {
             int64_t satoshisPerDest = -1;
             int64_t totalUnspent = 0;
@@ -1519,7 +1536,6 @@ static UniValue fillmempool(const Config &config,
             }
 
             rawHxTxs.push_back(rawTx);
-
             startingUnspentIdx += unspentCount;
             a.PrintProgress(startingUnspentIdx);
         }

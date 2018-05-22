@@ -139,6 +139,7 @@ static const CRPCConvertParam vRPCConvertParams[] = {
     {"rescanblockchain", 1, "stop_height"},
 #ifdef ENABLE_WALLET
     {"fillmempool", 0, "outputcount"},
+    {"fillmempool", 1, "maxtxs"},
 #endif
 
 };
