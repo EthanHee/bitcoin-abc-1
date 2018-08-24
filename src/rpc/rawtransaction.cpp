@@ -1365,6 +1365,7 @@ static UniValue fillmempool(const Config &config,
         ProgressLogHelper a(totalTxs, "Create raw transaction");
 
         unsigned int startingUnspentIdx = 0;
+        CFeeRate minRelayTxFee = config.GetMinFeePerKB();
         Amount feePerK = minRelayTxFee.GetFeePerK();
         const int assumedTxoutPerKb = 20;
         int64_t relayFeePerTxout = std::max((int64_t)200, OUTPUT_PER_INPUT * feePerK.GetSatoshis() / assumedTxoutPerKb);

@@ -734,14 +734,15 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
 
             UniValue deps(UniValue::VARR);
             for (const CTxIn &in : tx.vin) {
-                if (setTxIndex.count(in.prevout.hash))
-                    deps.push_back(setTxIndex[in.prevout.hash]);
+                if (setTxIndex.count(in.prevout.GetTxId())) {
+                    deps.push_back(setTxIndex[in.prevout.GetTxId()]);
+                }
             }
             entry.push_back(Pair("depends", deps));
 
             int index_in_template = i - 1;
-            entry.push_back(Pair(
-                "fee", pblocktemplate->vTxFees[index_in_template].GetSatoshis()));
+            entry.push_back(
+                Pair("fee", pblocktemplate->vTxFees[index_in_template] / SATOSHI));
             int64_t nTxSigOps = pblocktemplate->vTxSigOpsCount[index_in_template];
             entry.push_back(Pair("sigops", nTxSigOps));
 
