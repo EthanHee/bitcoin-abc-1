@@ -129,7 +129,8 @@ static const CRPCConvertParam vRPCConvertParams[] = {
     {"fillmempool", 0, "outputcount"},
     {"fillmempool", 1, "maxtxs"},
 #endif
-
+    {"rescanblockchain", 0, "start_height"},
+    {"rescanblockchain", 1, "stop_height"},
 };
 
 class CRPCConvertTable {
