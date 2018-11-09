@@ -1362,14 +1362,14 @@ static UniValue fillmempool(const Config &config,
         }
     }
 
-    int MAX_TX_SIZE = 10000000;
+    int maxTxSize = MAX_TX_SIZE;
     if(request.params.size() > 1)
     {
         if(request.params[1].isNum())
         {
-            MAX_TX_SIZE = request.params[1].get_int();
-            if(MAX_TX_SIZE < 1)
-                MAX_TX_SIZE = 1;
+            maxTxSize = request.params[1].get_int();
+            if(maxTxSize < 1)
+                maxTxSize = 1;
         }
         else
         {
@@ -1398,7 +1398,7 @@ static UniValue fillmempool(const Config &config,
         bool include_unsafe = true;
         std::vector<COutput> vecOutputs;
         assert(pwallet != nullptr);
-        pwallet->AvailableCoins(vecOutputs, !include_unsafe, nullptr, true);
+        pwallet->AvailableCoins(vecOutputs, !include_unsafe, nullptr);
         for (const COutput &out : vecOutputs) 
         {
             CTxDestination address;
@@ -1409,7 +1409,7 @@ static UniValue fillmempool(const Config &config,
                 continue;
 
             const Amount& amount = out.tx->tx->vout[out.i].nValue;
-            unspentList.push_back(Unspent{out.tx->GetId().GetHex(), static_cast<uint32_t>(out.i), amount.GetSatoshis()});
+            unspentList.push_back(Unspent{out.tx->GetId().GetHex(), static_cast<uint32_t>(out.i), amount / SATOSHI});
         }
     }
     LogPrintf("Found %d unspent transactions\n", unspentList.size());
@@ -1440,7 +1440,7 @@ static UniValue fillmempool(const Config &config,
     std::vector<CMutableTransaction> rawHxTxs;
     {
         // int startingOutAddress = 0;
-        unsigned int totalTxs = std::min((unsigned int)MAX_TX_SIZE, (unsigned int)unspentList.size());
+        unsigned int totalTxs = std::min((unsigned int)maxTxSize, (unsigned int)unspentList.size());
         rawHxTxs.reserve(totalTxs);
         ProgressLogHelper a(totalTxs, "Create raw transaction");
 
@@ -1448,7 +1448,7 @@ static UniValue fillmempool(const Config &config,
         CFeeRate minRelayTxFee = config.GetMinFeePerKB();
         Amount feePerK = minRelayTxFee.GetFeePerK();
         const int assumedTxoutPerKb = 20;
-        int64_t relayFeePerTxout = std::max((int64_t)200, OUTPUT_PER_INPUT * feePerK.GetSatoshis() / assumedTxoutPerKb);
+        int64_t relayFeePerTxout = std::max((int64_t)200, OUTPUT_PER_INPUT * feePerK / SATOSHI / assumedTxoutPerKb);
 
         while(startingUnspentIdx < unspentList.size() && rawHxTxs.size() < totalTxs)
         {
@@ -1479,7 +1479,7 @@ static UniValue fillmempool(const Config &config,
                 rawTx.vin.push_back(in);
             }
 
-            Amount nAmount(satoshisPerDest);
+            Amount nAmount(satoshisPerDest * SATOSHI);
 
             std::set<CTxDestination> destinations;
             // int endOutput = startingOutAddress + OUTPUT_PER_INPUT;
