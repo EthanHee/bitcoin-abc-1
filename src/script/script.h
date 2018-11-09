@@ -182,6 +182,10 @@ enum opcodetype {
     // The first op_code value after all defined opcodes
     FIRST_UNDEFINED_OP_VALUE,
 
+    // multi-byte opcodes
+    OP_PREFIX_BEGIN = 0xf0,
+    OP_PREFIX_END = 0xf7,
+
     // template matching params
     OP_SMALLINTEGER = 0xfa,
     OP_PUBKEYS = 0xfb,
@@ -472,14 +476,14 @@ public:
             insert(end(), uint8_t(b.size()));
         } else if (b.size() <= 0xffff) {
             insert(end(), OP_PUSHDATA2);
-            uint8_t data[2];
-            WriteLE16(data, b.size());
-            insert(end(), data, data + sizeof(data));
+            uint8_t _data[2];
+            WriteLE16(_data, b.size());
+            insert(end(), _data, _data + sizeof(_data));
         } else {
             insert(end(), OP_PUSHDATA4);
-            uint8_t data[4];
-            WriteLE32(data, b.size());
-            insert(end(), data, data + sizeof(data));
+            uint8_t _data[4];
+            WriteLE32(_data, b.size());
+            insert(end(), _data, _data + sizeof(_data));
         }
         insert(end(), b.begin(), b.end());
         return *this;
@@ -649,8 +653,9 @@ public:
     }
 
     void clear() {
-        // The default std::vector::clear() does not release memory.
-        CScriptBase().swap(*this);
+        // The default prevector::clear() does not release memory
+        CScriptBase::clear();
+        shrink_to_fit();
     }
 };
 

@@ -61,12 +61,7 @@
 #include <QSettings>
 #include <QTextDocument> // for Qt::mightBeRichText
 #include <QThread>
-
-#if QT_VERSION < 0x050000
-#include <QUrl>
-#else
 #include <QUrlQuery>
-#endif
 
 #if QT_VERSION >= 0x50200
 #include <QFontDatabase>
@@ -106,11 +101,7 @@ QFont fixedPitchFont() {
     return QFontDatabase::systemFont(QFontDatabase::FixedFont);
 #else
     QFont font("Monospace");
-#if QT_VERSION >= 0x040800
     font.setStyleHint(QFont::Monospace);
-#else
-    font.setStyleHint(QFont::TypeWriter);
-#endif
     return font;
 #endif
 }
@@ -160,13 +151,11 @@ void setupAddressWidget(QValidatedLineEdit *widget, QWidget *parent) {
     parent->setFocusProxy(widget);
 
     widget->setFont(fixedPitchFont());
-#if QT_VERSION >= 0x040700
     // We don't want translators to use own addresses in translations
     // and this is the only place, where this address is supplied.
     widget->setPlaceholderText(
         QObject::tr("Enter a Bitcoin address (e.g. %1)")
             .arg(QString::fromStdString(DummyAddress(GetConfig()))));
-#endif
     widget->setValidator(
         new BitcoinAddressEntryValidator(Params().CashAddrPrefix(), parent));
     widget->setCheckValidator(new BitcoinAddressCheckValidator(parent));
@@ -216,14 +205,10 @@ bool parseBitcoinURI(const QString &scheme, const QUrl &uri,
     if (rv.address.endsWith("/")) {
         rv.address.truncate(rv.address.length() - 1);
     }
-    rv.amount = Amount(0);
+    rv.amount = Amount::zero();
 
-#if QT_VERSION < 0x050000
-    QList<QPair<QString, QString>> items = uri.queryItems();
-#else
     QUrlQuery uriQuery(uri);
     QList<QPair<QString, QString>> items = uriQuery.queryItems();
-#endif
     for (QList<QPair<QString, QString>>::iterator i = items.begin();
          i != items.end(); i++) {
         bool fShouldReturnFalse = false;
@@ -280,7 +265,7 @@ QString formatBitcoinURI(const Config &config, const SendCoinsRecipient &info) {
     }
     int paramCount = 0;
 
-    if (info.amount != Amount(0)) {
+    if (info.amount != Amount::zero()) {
         ret +=
             QString("?amount=%1")
                 .arg(BitcoinUnits::format(BitcoinUnits::BCH, info.amount, false,
@@ -313,11 +298,7 @@ bool isDust(const QString &address, const Amount amount,
 }
 
 QString HtmlEscape(const QString &str, bool fMultiLine) {
-#if QT_VERSION < 0x050000
-    QString escaped = Qt::escape(str);
-#else
     QString escaped = str.toHtmlEscaped();
-#endif
     if (fMultiLine) {
         escaped = escaped.replace("\n", "<br>\n");
     }
@@ -350,13 +331,8 @@ QString getSaveFileName(QWidget *parent, const QString &caption,
     QString myDir;
     // Default to user documents location
     if (dir.isEmpty()) {
-#if QT_VERSION < 0x050000
-        myDir = QDesktopServices::storageLocation(
-            QDesktopServices::DocumentsLocation);
-#else
         myDir =
             QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-#endif
     } else {
         myDir = dir;
     }
@@ -396,13 +372,8 @@ QString getOpenFileName(QWidget *parent, const QString &caption,
     QString myDir;
     if (dir.isEmpty()) // Default to user documents location
     {
-#if QT_VERSION < 0x050000
-        myDir = QDesktopServices::storageLocation(
-            QDesktopServices::DocumentsLocation);
-#else
         myDir =
             QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-#endif
     } else {
         myDir = dir;
     }
@@ -536,12 +507,8 @@ void TableViewLastColumnResizingFixer::disconnectViewHeadersSignals() {
 // Refactored here for readability.
 void TableViewLastColumnResizingFixer::setViewHeaderResizeMode(
     int logicalIndex, QHeaderView::ResizeMode resizeMode) {
-#if QT_VERSION < 0x050000
-    tableView->horizontalHeader()->setResizeMode(logicalIndex, resizeMode);
-#else
     tableView->horizontalHeader()->setSectionResizeMode(logicalIndex,
                                                         resizeMode);
-#endif
 }
 
 void TableViewLastColumnResizingFixer::resizeColumn(int nColumnIndex,
@@ -638,7 +605,7 @@ TableViewLastColumnResizingFixer::TableViewLastColumnResizingFixer(
 
 #ifdef WIN32
 static fs::path StartupShortcutPath() {
-    std::string chain = ChainNameFromCommandLine();
+    std::string chain = gArgs.GetChainName();
     if (chain == CBaseChainParams::MAIN)
         return GetSpecialFolderPath(CSIDL_STARTUP) / "Bitcoin.lnk";
     // Remove this special case when CBaseChainParams::TESTNET = "testnet4"
@@ -736,7 +703,7 @@ static fs::path GetAutostartDir() {
 }
 
 static fs::path GetAutostartFilePath() {
-    std::string chain = ChainNameFromCommandLine();
+    std::string chain = gArgs.GetChainName();
     if (chain == CBaseChainParams::MAIN)
         return GetAutostartDir() / "bitcoin.desktop";
     return GetAutostartDir() / strprintf("bitcoin-%s.lnk", chain);
@@ -773,7 +740,7 @@ bool SetStartOnSystemStartup(bool fAutoStart) {
         fs::ofstream optionFile(GetAutostartFilePath(),
                                 std::ios_base::out | std::ios_base::trunc);
         if (!optionFile.good()) return false;
-        std::string chain = ChainNameFromCommandLine();
+        std::string chain = gArgs.GetChainName();
         // Write a bitcoin.desktop file to the autostart directory:
         optionFile << "[Desktop Entry]\n";
         optionFile << "Type=Application\n";
@@ -891,28 +858,6 @@ bool SetStartOnSystemStartup(bool fAutoStart) {
 }
 
 #endif
-
-void saveWindowGeometry(const QString &strSetting, QWidget *parent) {
-    QSettings settings;
-    settings.setValue(strSetting + "Pos", parent->pos());
-    settings.setValue(strSetting + "Size", parent->size());
-}
-
-void restoreWindowGeometry(const QString &strSetting, const QSize &defaultSize,
-                           QWidget *parent) {
-    QSettings settings;
-    QPoint pos = settings.value(strSetting + "Pos").toPoint();
-    QSize size = settings.value(strSetting + "Size", defaultSize).toSize();
-
-    if (!pos.x() && !pos.y()) {
-        QRect screen = QApplication::desktop()->screenGeometry();
-        pos.setX((screen.width() - size.width()) / 2);
-        pos.setY((screen.height() - size.height()) / 2);
-    }
-
-    parent->resize(size);
-    parent->move(pos);
-}
 
 void setClipboard(const QString &str) {
     QApplication::clipboard()->setText(str, QClipboard::Clipboard);

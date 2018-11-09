@@ -4,13 +4,14 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#ifndef BITCOIN_RPCSERVER_H
-#define BITCOIN_RPCSERVER_H
+#ifndef BITCOIN_RPC_SERVER_H
+#define BITCOIN_RPC_SERVER_H
 
 #include "amount.h"
 #include "rpc/jsonrpcrequest.h"
 #include "rpc/protocol.h"
 #include "uint256.h"
+#include "util.h"
 
 #include <cstdint>
 #include <functional>
@@ -18,6 +19,7 @@
 #include <map>
 #include <string>
 
+#include <boost/noncopyable.hpp>
 #include <univalue.h>
 
 static const unsigned int DEFAULT_RPC_SERIALIZE_VERSION = 1;
@@ -27,8 +29,6 @@ class ContextFreeRPCCommand;
 namespace RPCServerSignals {
 void OnStarted(std::function<void()> slot);
 void OnStopped(std::function<void()> slot);
-void OnPreCommand(std::function<void(const ContextFreeRPCCommand &)> slot);
-void OnPostCommand(std::function<void(const ContextFreeRPCCommand &)> slot);
 } // namespace RPCServerSignals
 
 class CBlockIndex;
@@ -44,6 +44,21 @@ struct UniValueType {
     UniValueType() : typeAny(true) {}
     bool typeAny;
     UniValue::VType type;
+};
+
+/**
+ * Class for registering and managing all RPC calls.
+ */
+class RPCServer : public boost::noncopyable {
+public:
+    RPCServer() {}
+
+    /**
+     * Attempts to execute an RPC command from the given request.
+     * If no RPC command exists that matches the request, an error is returned.
+     */
+    UniValue ExecuteCommand(Config &config,
+                            const JSONRPCRequest &request) const;
 };
 
 /**
@@ -155,7 +170,6 @@ class ContextFreeRPCCommand {
 public:
     std::string category;
     std::string name;
-    bool okSafeMode;
 
 private:
     union {
@@ -168,11 +182,9 @@ public:
     std::vector<std::string> argNames;
 
     ContextFreeRPCCommand(std::string _category, std::string _name,
-                          rpcfn_type _actor, bool _okSafeMode,
-                          std::vector<std::string> _argNames)
+                          rpcfn_type _actor, std::vector<std::string> _argNames)
         : category{std::move(_category)}, name{std::move(_name)},
-          okSafeMode{_okSafeMode}, useConstConfig{false}, argNames{std::move(
-                                                              _argNames)} {
+          useConstConfig{false}, argNames{std::move(_argNames)} {
         actor.fn = _actor;
     }
 
@@ -182,11 +194,10 @@ public:
      * on parameters of function is undefined behavior.
      */
     ContextFreeRPCCommand(std::string _category, std::string _name,
-                          const_rpcfn_type _actor, bool _okSafeMode,
+                          const_rpcfn_type _actor,
                           std::vector<std::string> _argNames)
         : category{std::move(_category)}, name{std::move(_name)},
-          okSafeMode{_okSafeMode}, useConstConfig{true}, argNames{std::move(
-                                                             _argNames)} {
+          useConstConfig{true}, argNames{std::move(_argNames)} {
         actor.cfn = _actor;
     }
 
@@ -233,6 +244,8 @@ public:
                        const ContextFreeRPCCommand *pcmd);
 };
 
+bool IsDeprecatedRPCEnabled(ArgsManager &args, const std::string &method);
+
 extern CRPCTable tableRPC;
 
 /**
@@ -253,8 +266,8 @@ extern std::string HelpExampleRpc(const std::string &methodname,
 bool StartRPC();
 void InterruptRPC();
 void StopRPC();
-std::string JSONRPCExecBatch(Config &config, const JSONRPCRequest &req,
-                             const UniValue &vReq);
+std::string JSONRPCExecBatch(Config &config, RPCServer &rpcServer,
+                             const JSONRPCRequest &req, const UniValue &vReq);
 void RPCNotifyBlockChange(bool ibd, const CBlockIndex *);
 
 /**
@@ -262,4 +275,4 @@ void RPCNotifyBlockChange(bool ibd, const CBlockIndex *);
  */
 int RPCSerializationFlags();
 
-#endif // BITCOIN_RPCSERVER_H
+#endif // BITCOIN_RPC_SERVER_H

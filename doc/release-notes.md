@@ -1,20 +1,19 @@
-Bitcoin ABC version 0.18.0 is now available from:
+Bitcoin ABC version 0.18.3 is now available from:
 
-  <https://download.bitcoinabc.org/0.18.0/>
+  <https://download.bitcoinabc.org/0.18.3/>
 
 This release includes the following features and fixes:
- - Remove the bip9params configuration.
- - Remove the bip9_softforks result from the getblockchaininfo RPC call.
- - Remove the rules, vbavailable and vbrequired result from the
-   getblocktemplate RPC call.
- - Remove the rules argument from the getblocktemplate RPC call.
- - Log difference between block header time and received time when competing
-   blocks are received for the same chain height.
- - Bump automatic replay protection to May 2019 upgrade.
- - Remove topological ordering constraint from blocks starting Nov, 15 2018.
- - Implement canonical transaction order, enforced Nov, 15 2018.
- - Add OP_CHECKDATASIG and OP_CHECKDATASIGVERIFY, activates Nov, 15 2018.
- - Enforce minimum transaction size of 100 bytes, starting Nov, 15 2018.
- - Enforce PUSH ONLY rule for scriptSig, starting Nov, 15 2018.
- - Enforce CLEANSTACK rule, starting Nov 15, 2018.
-
+ - Remove support for Qt4
+ - Upgrade reproducible build to use Qt 5.9.6
+ - Improve SHA256 performance using SSE4.1, AVX2 and/or SHA if available.
+ - Add a mode argument to the `getmemoryinfo` RPC call to query `malloc_info` from the system if available.
+ - Updated univalue library to version 1.0.4
+ - Disable safe mode by default
+ - Added autocomplete to 'help' in RPC console
+ - Deprecated estimatefee RPC command
+ - Improved help message for backup wallet RPC
+ - Various bug fixes that improve node stability and performance
+ - Backport getblock RPC's new verbosity mode from bitcoin core for retrieving all transactions of a given block in full.
+ - Added parkblock/unparkblock RPC commands and 'parked' state to getchaintips RPC
+ - RPC `listreceivedbyaddress` now accepts an address filter
+ - Backport combinerawtransaction RPC from bitcoin core to combine multiple partially signed transactions into one transaction.

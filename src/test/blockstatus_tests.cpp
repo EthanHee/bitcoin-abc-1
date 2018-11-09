@@ -2,7 +2,8 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "chain.h"
+#include "blockstatus.h"
+#include "blockvalidity.h"
 #include "test/test_bitcoin.h"
 
 #include <boost/test/unit_test.hpp>
@@ -41,9 +42,11 @@ static void CheckAllPermutations(const BlockStatus base, bool hasData,
         CheckBlockStatus(s, validity, hasData, hasUndo, hasFailed,
                          hasFailedParent, isParked, hasParkedParent);
 
-        // Clears failure flags.
+        // Clear various flags.
         CheckBlockStatus(s.withClearedFailureFlags(), validity, hasData,
                          hasUndo, false, false, isParked, hasParkedParent);
+        CheckBlockStatus(s.withClearedParkedFlags(), validity, hasData, hasUndo,
+                         hasFailed, hasFailedParent, false, false);
 
         // Also check all possible alterations.
         CheckBlockStatus(s.withData(true), validity, true, hasUndo, hasFailed,

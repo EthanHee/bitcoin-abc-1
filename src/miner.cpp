@@ -10,8 +10,10 @@
 #include "chainparams.h"
 #include "coins.h"
 #include "config.h"
+#include "consensus/activation.h"
 #include "consensus/consensus.h"
 #include "consensus/merkle.h"
+#include "consensus/tx_verify.h"
 #include "consensus/validation.h"
 #include "hash.h"
 #include "net.h"
@@ -91,11 +93,11 @@ static uint64_t ComputeMaxGeneratedBlockSize(const Config &config,
 BlockAssembler::BlockAssembler(const Config &_config) : config(&_config) {
 
     if (gArgs.IsArgSet("-blockmintxfee")) {
-        Amount n(0);
+        Amount n = Amount::zero();
         ParseMoney(gArgs.GetArg("-blockmintxfee", ""), n);
         blockMinFeeRate = CFeeRate(n);
     } else {
-        blockMinFeeRate = CFeeRate(DEFAULT_BLOCK_MIN_TX_FEE);
+        blockMinFeeRate = CFeeRate(DEFAULT_BLOCK_MIN_TX_FEE_PER_KB);
     }
 
     LOCK(cs_main);
@@ -112,7 +114,7 @@ void BlockAssembler::resetBlock() {
 
     // These counters do not include coinbase tx.
     nBlockTx = 0;
-    nFees = Amount(0);
+    nFees = Amount::zero();
 
     lastFewTxs = 0;
 }
@@ -142,7 +144,7 @@ BlockAssembler::CreateNewBlock(const CScript &scriptPubKeyIn) {
     // Add dummy coinbase tx as first transaction.
     pblock->vtx.emplace_back();
     // updated at end
-    pblocktemplate->vTxFees.push_back(Amount(-1));
+    pblocktemplate->vTxFees.push_back(-SATOSHI);
     // updated at end
     pblocktemplate->vTxSigOpsCount.push_back(-1);
 
@@ -179,7 +181,7 @@ BlockAssembler::CreateNewBlock(const CScript &scriptPubKeyIn) {
         std::sort(std::begin(pblock->vtx) + 1, std::end(pblock->vtx),
                   [](const std::shared_ptr<const CTransaction> &a,
                      const std::shared_ptr<const CTransaction> &b) -> bool {
-                      return a->GetId() > b->GetId();
+                      return a->GetId() < b->GetId();
                   });
     }
 
@@ -388,6 +390,7 @@ int BlockAssembler::UpdatePackagesForAdded(
             if (mit == mapModifiedTx.end()) {
                 CTxMemPoolModifiedEntry modEntry(desc);
                 modEntry.nSizeWithAncestors -= it->GetTxSize();
+                modEntry.nBillableSizeWithAncestors -= it->GetTxBillableSize();
                 modEntry.nModFeesWithAncestors -= it->GetModifiedFee();
                 modEntry.nSigOpCountWithAncestors -= it->GetSigOpCount();
                 mapModifiedTx.insert(modEntry);

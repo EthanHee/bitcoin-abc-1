@@ -5,6 +5,7 @@
 
 #include "rpc/mining.h"
 #include "amount.h"
+#include "blockvalidity.h"
 #include "chain.h"
 #include "chainparams.h"
 #include "config.h"
@@ -253,18 +254,18 @@ static UniValue getmininginfo(const Config &config,
     LOCK(cs_main);
 
     UniValue obj(UniValue::VOBJ);
-    obj.push_back(Pair("blocks", int(chainActive.Height())));
-    obj.push_back(Pair("currentblocksize", uint64_t(nLastBlockSize)));
-    obj.push_back(Pair("currentblocktx", uint64_t(nLastBlockTx)));
-    obj.push_back(Pair("difficulty", double(GetDifficulty(chainActive.Tip()))));
+    obj.pushKV("blocks", int(chainActive.Height()));
+    obj.pushKV("currentblocksize", uint64_t(nLastBlockSize));
+    obj.pushKV("currentblocktx", uint64_t(nLastBlockTx));
+    obj.pushKV("difficulty", double(GetDifficulty(chainActive.Tip())));
     obj.push_back(
         Pair("blockprioritypercentage",
              uint8_t(gArgs.GetArg("-blockprioritypercentage",
                                   DEFAULT_BLOCK_PRIORITY_PERCENTAGE))));
-    obj.push_back(Pair("errors", GetWarnings("statusbar")));
-    obj.push_back(Pair("networkhashps", getnetworkhashps(config, request)));
-    obj.push_back(Pair("pooledtx", uint64_t(mempool.size())));
-    obj.push_back(Pair("chain", config.GetChainParams().NetworkIDString()));
+    obj.pushKV("errors", GetWarnings("statusbar"));
+    obj.pushKV("networkhashps", getnetworkhashps(config, request));
+    obj.pushKV("pooledtx", uint64_t(mempool.size()));
+    obj.pushKV("chain", config.GetChainParams().NetworkIDString());
     return obj;
 }
 
@@ -301,7 +302,7 @@ static UniValue prioritisetransaction(const Config &config,
     LOCK(cs_main);
 
     uint256 hash = ParseHashStr(request.params[0].get_str(), "txid");
-    Amount nAmount(request.params[2].get_int64());
+    Amount nAmount = request.params[2].get_int64() * SATOSHI;
 
     mempool.PrioritiseTransaction(hash, request.params[0].get_str(),
                                   request.params[1].get_real(), nAmount);
@@ -585,7 +586,7 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
         // Wait to respond until either the best block changes, OR a minute has
         // passed and there are more transactions
         uint256 hashWatchedChain;
-        boost::system_time checktxtime;
+        std::chrono::steady_clock::time_point checktxtime;
         unsigned int nTransactionsUpdatedLastLP;
 
         if (lpval.isStr()) {
@@ -605,18 +606,18 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
         LEAVE_CRITICAL_SECTION(cs_main);
         {
             checktxtime =
-                boost::get_system_time() + boost::posix_time::minutes(1);
+                std::chrono::steady_clock::now() + std::chrono::minutes(1);
 
-            boost::unique_lock<boost::mutex> lock(csBestBlock);
-            while (chainActive.Tip()->GetBlockHash() == hashWatchedChain &&
-                   IsRPCRunning()) {
-                if (!cvBlockChange.timed_wait(lock, checktxtime)) {
+            WAIT_LOCK(g_best_block_mutex, lock);
+            while (g_best_block == hashWatchedChain && IsRPCRunning()) {
+                if (g_best_block_cv.wait_until(lock, checktxtime) ==
+                    std::cv_status::timeout) {
                     // Timeout: Check transactions for update
                     if (mempool.GetTransactionsUpdated() !=
                         nTransactionsUpdatedLastLP) {
                         break;
                     }
-                    checktxtime += boost::posix_time::seconds(10);
+                    checktxtime += std::chrono::seconds(10);
                 }
             }
         }
@@ -766,9 +767,9 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
     aMutable.push_back("prevblock");
 
     UniValue result(UniValue::VOBJ);
-    result.push_back(Pair("capabilities", aCaps));
+    result.pushKV("capabilities", aCaps);
 
-    result.push_back(Pair("version", pblock->nVersion));
+    result.pushKV("version", pblock->nVersion);
 
     result.push_back(Pair("previousblockhash", pblock->hashPrevBlock.GetHex()));
     if(lightVersion)
@@ -786,18 +787,18 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
     result.push_back(Pair("longpollid",
                           chainActive.Tip()->GetBlockHash().GetHex() +
                               i64tostr(nTransactionsUpdatedLast)));
-    result.push_back(Pair("target", hashTarget.GetHex()));
+    result.pushKV("target", hashTarget.GetHex());
     result.push_back(
         Pair("mintime", int64_t(pindexPrev->GetMedianTimePast()) + 1));
-    result.push_back(Pair("mutable", aMutable));
-    result.push_back(Pair("noncerange", "00000000ffffffff"));
+    result.pushKV("mutable", aMutable);
+    result.pushKV("noncerange", "00000000ffffffff");
     // FIXME: Allow for mining block greater than 1M.
     result.push_back(
         Pair("sigoplimit", GetMaxBlockSigOpsCount(DEFAULT_MAX_BLOCK_SIZE)));
-    result.push_back(Pair("sizelimit", DEFAULT_MAX_BLOCK_SIZE));
-    result.push_back(Pair("curtime", pblock->GetBlockTime()));
-    result.push_back(Pair("bits", strprintf("%08x", pblock->nBits)));
-    result.push_back(Pair("height", int64_t(pindexPrev->nHeight) + 1));
+    result.pushKV("sizelimit", DEFAULT_MAX_BLOCK_SIZE);
+    result.pushKV("curtime", pblock->GetBlockTime());
+    result.pushKV("bits", strprintf("%08x", pblock->nBits));
+    result.pushKV("height", int64_t(pindexPrev->nHeight) + 1);
 
     if(lightVersion)
     {
@@ -1112,7 +1113,7 @@ static UniValue estimatefee(const Config &config,
     }
 
     CFeeRate feeRate = mempool.estimateFee(nBlocks);
-    if (feeRate == CFeeRate(Amount(0))) {
+    if (feeRate == CFeeRate(Amount::zero())) {
         return -1.0;
     }
 
@@ -1121,19 +1122,19 @@ static UniValue estimatefee(const Config &config,
 
 // clang-format off
 static const ContextFreeRPCCommand commands[] = {
-    //  category   name                     actor (function)       okSafeMode
+    //  category   name                     actor (function)       argNames
     //  ---------- ------------------------ ---------------------- ----------
-    {"mining",     "getnetworkhashps",      getnetworkhashps,      true, {"nblocks", "height"}},
-    {"mining",     "getmininginfo",         getmininginfo,         true, {}},
-    {"mining",     "prioritisetransaction", prioritisetransaction, true, {"txid", "priority_delta", "fee_delta"}},
-    {"mining",     "getblocktemplate",      getblocktemplate,      true, {"template_request"}},
-    {"mining",     "getblocktemplatelight", getblocktemplatelight, true, {"template_request", "additional_txs"}},
-    {"mining",     "submitblock",           submitblock,           true, {"hexdata", "parameters"}},
-    {"mining",     "submitblocklight",      submitblocklight,      true, {"hexdata", "job_id", "parameters"}},
+    {"mining",     "getnetworkhashps",      getnetworkhashps,      {"nblocks", "height"}},
+    {"mining",     "getmininginfo",         getmininginfo,         {}},
+    {"mining",     "prioritisetransaction", prioritisetransaction, {"txid", "priority_delta", "fee_delta"}},
+    {"mining",     "getblocktemplate",      getblocktemplate,      {"template_request"}},
+    {"mining",     "getblocktemplatelight", getblocktemplatelight, {"template_request", "additional_txs"}},
+    {"mining",     "submitblock",           submitblock,           {"hexdata", "parameters"}},
+    {"mining",     "submitblocklight",      submitblocklight,      {"hexdata", "job_id", "parameters"}},
 
-    {"generating", "generatetoaddress",     generatetoaddress,     true, {"nblocks", "address", "maxtries"}},
+    {"generating", "generatetoaddress",     generatetoaddress,     {"nblocks", "address", "maxtries"}},
 
-    {"util",       "estimatefee",           estimatefee,           true, {"nblocks"}},
+    {"util",       "estimatefee",           estimatefee,           {"nblocks"}},
 };
 // clang-format on
 

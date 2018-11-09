@@ -18,9 +18,10 @@
 #include <univalue.h>
 
 #include <boost/algorithm/string/case_conv.hpp> // for to_upper()
+#include <boost/algorithm/string/classification.hpp>
+#include <boost/algorithm/string/split.hpp>
 #include <boost/bind.hpp>
 #include <boost/signals2/signal.hpp>
-#include <boost/thread.hpp>
 
 #include <memory> // for unique_ptr
 #include <set>
@@ -35,11 +36,27 @@ static RPCTimerInterface *timerInterface = nullptr;
 /* Map of name to timer. */
 static std::map<std::string, std::unique_ptr<RPCTimerBase>> deadlineTimers;
 
+UniValue RPCServer::ExecuteCommand(Config &config,
+                                   const JSONRPCRequest &request) const {
+    // Return immediately if in warmup
+    {
+        LOCK(cs_rpcWarmup);
+        if (fRPCInWarmup) {
+            throw JSONRPCError(RPC_IN_WARMUP, rpcWarmupStatus);
+        }
+    }
+
+    // TODO Only call tableRPC.execute() if no context-sensitive RPC command
+    // exists
+
+    // Check if context-free RPC method is valid and execute it
+    return tableRPC.execute(config, request);
+}
+
 static struct CRPCSignals {
     boost::signals2::signal<void()> Started;
     boost::signals2::signal<void()> Stopped;
     boost::signals2::signal<void(const ContextFreeRPCCommand &)> PreCommand;
-    boost::signals2::signal<void(const ContextFreeRPCCommand &)> PostCommand;
 } g_rpcSignals;
 
 void RPCServerSignals::OnStarted(std::function<void()> slot) {
@@ -48,16 +65,6 @@ void RPCServerSignals::OnStarted(std::function<void()> slot) {
 
 void RPCServerSignals::OnStopped(std::function<void()> slot) {
     g_rpcSignals.Stopped.connect(slot);
-}
-
-void RPCServerSignals::OnPreCommand(
-    std::function<void(const ContextFreeRPCCommand &)> slot) {
-    g_rpcSignals.PreCommand.connect(boost::bind(slot, _1));
-}
-
-void RPCServerSignals::OnPostCommand(
-    std::function<void(const ContextFreeRPCCommand &)> slot) {
-    g_rpcSignals.PostCommand.connect(boost::bind(slot, _1));
 }
 
 void RPCTypeCheck(const UniValue &params,
@@ -124,7 +131,7 @@ Amount AmountFromValue(const UniValue &value) {
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid amount");
     }
 
-    Amount amt(n);
+    Amount amt = n * SATOSHI;
     if (!MoneyRange(amt)) {
         throw JSONRPCError(RPC_TYPE_ERROR, "Amount out of range");
     }
@@ -133,10 +140,10 @@ Amount AmountFromValue(const UniValue &value) {
 }
 
 UniValue ValueFromAmount(const Amount amount) {
-    bool sign = amount < Amount(0);
+    bool sign = amount < Amount::zero();
     Amount n_abs(sign ? -amount : amount);
     int64_t quotient = n_abs / COIN;
-    int64_t remainder = n_abs % COIN;
+    int64_t remainder = (n_abs % COIN) / SATOSHI;
     return UniValue(UniValue::VNUM, strprintf("%s%d.%08d", sign ? "-" : "",
                                               quotient, remainder));
 }
@@ -154,7 +161,7 @@ uint256 ParseHashV(const UniValue &v, std::string strName) {
                                strHex + "')");
     }
 
-    if (64 != strHex.length()) {
+    if (strHex.length() != 64) {
         throw JSONRPCError(RPC_INVALID_PARAMETER,
                            strprintf("%s must be of length %d (not %d)",
                                      strName, 64, strHex.length()));
@@ -223,8 +230,6 @@ std::string CRPCTable::help(Config &config, const std::string &strCommand,
 
         jreq.strMethod = strMethod;
         try {
-            JSONRPCRequest jreq;
-            jreq.fHelp = true;
             if (setDone.insert(pcmd).second) {
                 pcmd->call(config, jreq);
             }
@@ -311,12 +316,12 @@ static UniValue uptime(const Config &config,
  */
 // clang-format off
 static const ContextFreeRPCCommand vRPCCommands[] = {
-    //  category            name                      actor (function)        okSafe argNames
-    //  ------------------- ------------------------  ----------------------  ------ ----------
+    //  category            name                      actor (function)        argNames
+    //  ------------------- ------------------------  ----------------------  ----------
     /* Overall control/query calls */
-    { "control",            "help",                   help,                   true,  {"command"}  },
-    { "control",            "stop",                   stop,                   true,  {}  },
-    { "control",            "uptime",                 uptime,                 true,  {}  },
+    { "control",            "help",                   help,                   {"command"}  },
+    { "control",            "stop",                   stop,                   {}  },
+    { "control",            "uptime",                 uptime,                 {}  },
 };
 // clang-format on
 
@@ -402,14 +407,22 @@ bool RPCIsInWarmup(std::string *outStatus) {
     return fRPCInWarmup;
 }
 
-static UniValue JSONRPCExecOne(Config &config, JSONRPCRequest jreq,
-                               const UniValue &req) {
+bool IsDeprecatedRPCEnabled(ArgsManager &args, const std::string &method) {
+    const std::vector<std::string> enabled_methods =
+        args.GetArgs("-deprecatedrpc");
+
+    return find(enabled_methods.begin(), enabled_methods.end(), method) !=
+           enabled_methods.end();
+}
+
+static UniValue JSONRPCExecOne(Config &config, RPCServer &rpcServer,
+                               JSONRPCRequest jreq, const UniValue &req) {
     UniValue rpc_result(UniValue::VOBJ);
 
     try {
         jreq.parse(req);
 
-        UniValue result = tableRPC.execute(config, jreq);
+        UniValue result = rpcServer.ExecuteCommand(config, jreq);
         rpc_result = JSONRPCReplyObj(result, NullUniValue, jreq.id);
     } catch (const UniValue &objError) {
         rpc_result = JSONRPCReplyObj(NullUniValue, objError, jreq.id);
@@ -421,11 +434,11 @@ static UniValue JSONRPCExecOne(Config &config, JSONRPCRequest jreq,
     return rpc_result;
 }
 
-std::string JSONRPCExecBatch(Config &config, const JSONRPCRequest &jreq,
-                             const UniValue &vReq) {
+std::string JSONRPCExecBatch(Config &config, RPCServer &rpcServer,
+                             const JSONRPCRequest &jreq, const UniValue &vReq) {
     UniValue ret(UniValue::VARR);
     for (size_t i = 0; i < vReq.size(); i++) {
-        ret.push_back(JSONRPCExecOne(config, jreq, vReq[i]));
+        ret.push_back(JSONRPCExecOne(config, rpcServer, jreq, vReq[i]));
     }
 
     return ret.write() + "\n";
@@ -450,8 +463,17 @@ transformNamedArguments(const JSONRPCRequest &in,
     }
     // Process expected parameters.
     int hole = 0;
-    for (const std::string &argName : argNames) {
-        auto fr = argsIn.find(argName);
+    for (const std::string &argNamePattern : argNames) {
+        std::vector<std::string> vargNames;
+        boost::algorithm::split(vargNames, argNamePattern,
+                                boost::algorithm::is_any_of("|"));
+        auto fr = argsIn.end();
+        for (const std::string &argName : vargNames) {
+            fr = argsIn.find(argName);
+            if (fr != argsIn.end()) {
+                break;
+            }
+        }
         if (fr != argsIn.end()) {
             for (int i = 0; i < hole; ++i) {
                 // Fill hole between specified parameters with JSON nulls, but
@@ -485,7 +507,8 @@ UniValue CRPCTable::execute(Config &config,
         }
     }
 
-    // Find method
+    // Check if legacy RPC method is valid.
+    // See RPCServer::ExecuteCommand for context-sensitive RPC commands.
     const ContextFreeRPCCommand *pcmd = tableRPC[request.strMethod];
     if (!pcmd) {
         throw JSONRPCError(RPC_METHOD_NOT_FOUND, "Method not found");
@@ -504,8 +527,6 @@ UniValue CRPCTable::execute(Config &config,
     } catch (const std::exception &e) {
         throw JSONRPCError(RPC_MISC_ERROR, e.what());
     }
-
-    g_rpcSignals.PostCommand(*pcmd);
 }
 
 std::vector<std::string> CRPCTable::listCommands() const {

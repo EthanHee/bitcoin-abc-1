@@ -115,12 +115,12 @@ public:
 
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S(
-            "000000000000000000000000000000000000000000b8702680bcb0fec8548e05");
+            "000000000000000000000000000000000000000000d08f1ac94b87b3de7115db");
 
         // By default assume that the signatures in ancestors of this block are
         // valid.
         consensus.defaultAssumeValid = uint256S(
-            "0000000000000000007e11995a8969e2d8838e72da271cdd1903ae4c6753064a");
+            "00000000000000000114bfbf9937f3384c0f0f196f137f37a1b176ec4510ae52");
 
         // August 1, 2017 hard fork
         consensus.uahfHeight = 478558;
@@ -160,26 +160,23 @@ public:
                uint256S("4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b"
                         "7afdeda33b"));
 
-        // Note that of those with the service bits flag, most only support a
-        // subset of possible options.
+        // Note that of those which support the service bits prefix, most only
+        // support a subset of possible options. This is fine at runtime as
+        // we'll fall back to using them as a oneshot if they dont support the
+        // service bits we want, but we should get them updated to support all
+        // service bits wanted by any release ASAP to avoid it where possible.
         // Bitcoin ABC seeder
-        vSeeds.push_back(
-            CDNSSeedData("bitcoinabc.org", "seed.bitcoinabc.org", true));
+        vSeeds.emplace_back("seed.bitcoinabc.org");
         // bitcoinforks seeders
-        vSeeds.push_back(CDNSSeedData("bitcoinforks.org",
-                                      "seed-abc.bitcoinforks.org", true));
+        vSeeds.emplace_back("seed-abc.bitcoinforks.org");
         // BU backed seeder
-        vSeeds.push_back(CDNSSeedData("bitcoinunlimited.info",
-                                      "btccash-seeder.bitcoinunlimited.info",
-                                      true));
+        vSeeds.emplace_back("btccash-seeder.bitcoinunlimited.info");
         // Bitprim
-        vSeeds.push_back(CDNSSeedData("bitprim.org", "seed.bitprim.org", true));
+        vSeeds.emplace_back("seed.bitprim.org");
         // Amaury SÉCHET
-        vSeeds.push_back(
-            CDNSSeedData("deadalnix.me", "seed.deadalnix.me", true));
+        vSeeds.emplace_back("seed.deadalnix.me");
         // criptolayer.net
-        vSeeds.push_back(
-            CDNSSeedData("criptolayer.net", "seeder.criptolayer.net", true));
+        vSeeds.emplace_back("seeder.criptolayer.net");
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<uint8_t>(1, 0);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<uint8_t>(1, 5);
@@ -191,7 +188,6 @@ public:
         vFixedSeeds = std::vector<SeedSpec6>(
             pnSeed6_main, pnSeed6_main + ARRAYLEN(pnSeed6_main));
 
-        fMiningRequiresPeers = true;
         fDefaultConsistencyChecks = false;
         fRequireStandard = true;
         fMineBlocksOnDemand = false;
@@ -287,12 +283,12 @@ public:
 
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S(
-            "000000000000000000000000000000000000000000000030015a07e503af3227");
+            "00000000000000000000000000000000000000000000003e28ffb60a2b69f5f0");
 
         // By default assume that the signatures in ancestors of this block are
         // valid.
         consensus.defaultAssumeValid = uint256S(
-            "00000000000000ba5624709777f8df34b911c16a33a474562aec7360580218cc");
+            "0000000000000102b62e613c19671226fc8e098d4f89cf8b8da3f73aca8590e1");
 
         // August 1, 2017 hard fork
         consensus.uahfHeight = 1155875;
@@ -331,20 +327,15 @@ public:
         vSeeds.clear();
         // nodes with support for servicebits filtering should be at the top
         // Bitcoin ABC seeder
-        vSeeds.push_back(CDNSSeedData("bitcoinabc.org",
-                                      "testnet-seed.bitcoinabc.org", true));
+        vSeeds.emplace_back("testnet-seed.bitcoinabc.org");
         // bitcoinforks seeders
-        vSeeds.push_back(CDNSSeedData(
-            "bitcoinforks.org", "testnet-seed-abc.bitcoinforks.org", true));
+        vSeeds.emplace_back("testnet-seed-abc.bitcoinforks.org");
         // Bitprim
-        vSeeds.push_back(
-            CDNSSeedData("bitprim.org", "testnet-seed.bitprim.org", true));
+        vSeeds.emplace_back("testnet-seed.bitprim.org");
         // Amaury SÉCHET
-        vSeeds.push_back(
-            CDNSSeedData("deadalnix.me", "testnet-seed.deadalnix.me", true));
+        vSeeds.emplace_back("testnet-seed.deadalnix.me");
         // criptolayer.net
-        vSeeds.push_back(CDNSSeedData("criptolayer.net",
-                                      "testnet-seeder.criptolayer.net", true));
+        vSeeds.emplace_back("testnet-seeder.criptolayer.net");
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<uint8_t>(1, 111);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<uint8_t>(1, 196);
@@ -355,7 +346,6 @@ public:
         vFixedSeeds = std::vector<SeedSpec6>(
             pnSeed6_test, pnSeed6_test + ARRAYLEN(pnSeed6_test));
 
-        fMiningRequiresPeers = true;
         fDefaultConsistencyChecks = false;
         fRequireStandard = false;
         fMineBlocksOnDemand = false;
@@ -457,7 +447,6 @@ public:
         //!< Regtest mode doesn't have any DNS seeds.
         vSeeds.clear();
 
-        fMiningRequiresPeers = false;
         fDefaultConsistencyChecks = true;
         fRequireStandard = false;
         fMineBlocksOnDemand = true;
