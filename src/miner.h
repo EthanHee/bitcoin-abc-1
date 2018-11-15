@@ -24,10 +24,19 @@ class CWallet;
 
 static const bool DEFAULT_PRINTPRIORITY = false;
 
+struct CBlockTemplateEntry {
+    CTransactionRef tx;
+    Amount fees;
+    int64_t sigOpCount;
+
+    CBlockTemplateEntry(CTransactionRef _tx, Amount _fees, int64_t _sigOpCount)
+        : tx(_tx), fees(_fees), sigOpCount(_sigOpCount){};
+};
+
 struct CBlockTemplate {
     CBlock block;
-    std::vector<Amount> vTxFees;
-    std::vector<int64_t> vTxSigOpsCount;
+
+    std::vector<CBlockTemplateEntry> entries;
 };
 
 // Container for tracking updates to ancestor feerate as we include (parent)
