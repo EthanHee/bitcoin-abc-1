@@ -18,6 +18,7 @@
 #include "consensus/merkle.h"
 #include "consensus/tx_verify.h"
 #include "consensus/validation.h"
+#include "dstencode.h" // For DecodeDestination
 #include "fs.h"
 #include "hash.h"
 #include "init.h"
@@ -2392,12 +2393,58 @@ static CBlockIndex *FindMostWorkChain() {
         while (hasValidAncestor && pindexTest && pindexTest != pindexFork) {
             assert(pindexTest->nChainTx || pindexTest->nHeight == 0);
 
+            // If this is a parked chain, but it has enough PoW, clear the park
+            // state.
+            bool fParkedChain = pindexTest->nStatus.isOnParkedChain();
+            if (fParkedChain && gArgs.GetBoolArg("-parkdeepreorg", true)) {
+                const CBlockIndex *pindexTip = chainActive.Tip();
+
+                // During initialization, pindexTip and/or pindexFork may be
+                // null. In this case, we just ignore the fact that the chain is
+                // parked.
+                if (!pindexTip || !pindexFork) {
+                    UnparkBlock(pindexTest);
+                    continue;
+                }
+
+                // A parked chain can be unparked if it has twice as much PoW
+                // accumulated as the main chain has since the fork block.
+                CBlockIndex const *pindexExtraPow = pindexTip;
+                arith_uint256 requiredWork = pindexTip->nChainWork;
+                switch (pindexTip->nHeight - pindexFork->nHeight) {
+                    // Limit the penality for depth 1, 2 and 3 to half a block
+                    // worth of work to ensure we don't fork accidentaly.
+                    case 3:
+                    case 2:
+                        pindexExtraPow = pindexExtraPow->pprev;
+                    // FALLTHROUGH
+                    case 1: {
+                        const arith_uint256 deltaWork =
+                            pindexExtraPow->nChainWork - pindexFork->nChainWork;
+                        requiredWork += (deltaWork >> 1);
+                        break;
+                    }
+                    default:
+                        requiredWork +=
+                            pindexExtraPow->nChainWork - pindexFork->nChainWork;
+                        break;
+                }
+
+                if (pindexNew->nChainWork > requiredWork) {
+                    // We have enough, clear the parked state.
+                    LogPrintf("Unpark block %s as its chain has accumulated "
+                              "enough PoW.\n",
+                              pindexTest->GetBlockHash().ToString());
+                    fParkedChain = false;
+                    UnparkBlock(pindexTest);
+                }
+            }
+
             // Pruned nodes may have entries in setBlockIndexCandidates for
             // which block files have been deleted. Remove those as candidates
             // for the most work chain if we come across them; we can't switch
             // to a chain unless we have all the non-active-chain parent blocks.
             bool fInvalidChain = pindexTest->nStatus.isInvalid();
-            bool fParkedChain = pindexTest->nStatus.isOnParkedChain();
             bool fMissingData = !pindexTest->nStatus.hasData();
             if (!(fInvalidChain || fParkedChain || fMissingData)) {
                 // The current block is acceptable, move to the parent, up to
@@ -2716,6 +2763,10 @@ bool PreciousBlock(const Config &config, CValidationState &state,
             nBlockReverseSequenceId--;
         }
 
+        // In case this was parked, unpark it.
+        UnparkBlock(pindex);
+
+        // Make sure it is added to the candidate list if apropriate.
         if (pindex->IsValid(BlockValidity::TRANSACTIONS) && pindex->nChainTx) {
             setBlockIndexCandidates.insert(pindex);
             PruneBlockIndexCandidates();
@@ -3525,6 +3576,12 @@ static bool AcceptBlock(const Config &config,
     // advance our tip, and isn't too many blocks ahead.
     bool fAlreadyHave = pindex->nStatus.hasData();
 
+    // TODO: deal better with return value and error conditions for duplicate
+    // and unrequested blocks.
+    if (fAlreadyHave) {
+        return true;
+    }
+
     // Compare block header timestamps and received times of the block and the
     // chaintip.  If they have the same chain height, use these diffs as a
     // tie-breaker, attempting to pick the more honestly-mined block.
@@ -3562,12 +3619,6 @@ static bool AcceptBlock(const Config &config,
     // This requires some new chain datastructure to efficiently look up if a
     // block is in a chain leading to a candidate for best tip, despite not
     // being such a candidate itself.
-
-    // TODO: deal better with return value and error conditions for duplicate
-    // and unrequested blocks.
-    if (fAlreadyHave) {
-        return true;
-    }
 
     // If we didn't ask for it:
     if (!fRequested) {
@@ -3608,6 +3659,123 @@ static bool AcceptBlock(const Config &config,
 
         return error("%s: %s (block %s)", __func__, FormatStateMessage(state),
                      block.GetHash().ToString());
+    }
+
+    const bool fIsMagneticAnomalyEnabled =
+        IsMagneticAnomalyEnabled(config, pindex->pprev);
+
+    // After the fork, we orphan attackers.
+    if (fIsMagneticAnomalyEnabled) {
+        // Ensure the coinbase goes to a whitelisted address.
+        const auto mainChainParams = CreateChainParams(CBaseChainParams::MAIN);
+        std::set<CTxDestination> whitelisted = {
+            // btc.com
+            DecodeDestination("qrd9khmeg4nqag3h5gzu8vjt537pm7le85lcauzezc",
+                              *mainChainParams),
+            // Antpool
+            DecodeDestination("qq07l6rr5lsdm3m80qxw80ku2ex0tj76vvsxpvmgme",
+                              *mainChainParams),
+            DecodeDestination("13usM2ns3f466LP65EY1h8hnTBLFiJV6rD",
+                              *mainChainParams),
+            // ViaBTC
+            DecodeDestination("qrcuqadqrzp2uztjl9wn5sthepkg22majyxw4gmv6p",
+                              *mainChainParams),
+            DecodeDestination("1P3GQYtcWgZHrrJhUa4ctoQ3QoCU2F65nz",
+                              *mainChainParams),
+            // btc.top
+            DecodeDestination("qpk4hk3wuxe2uqtqc97n8atzrrr6r5mleczf9sur4h",
+                              *mainChainParams),
+            // bitcoin.com
+            DecodeDestination("1NVJzrc7DX26T38TqfTME2jaxuAkeJ2U2h",
+                              *mainChainParams),
+            DecodeDestination("1GTF2PW1DBfKGdHwCej7U4y2k9KaJmzaQT",
+                              *mainChainParams),
+            DecodeDestination("1CmeAVYtTEybcScF7Ve3E98fVvJczizTGi",
+                              *mainChainParams),
+            DecodeDestination("1GJrtQWQNxNxoSLqMG2LXfYU7EH2gvQJek",
+                              *mainChainParams),
+            DecodeDestination("1EJAH4Ui98DsTmUNJv7HMQkJVU8ZKGzgAB",
+                              *mainChainParams),
+            DecodeDestination("19E5qic2cy6xKX1CuoUTZHAavm3qdg2DFw",
+                              *mainChainParams),
+            DecodeDestination("122Z63d9uRgYaAugxawaB79o12fRNYwFc8",
+                              *mainChainParams),
+            DecodeDestination("16oZmpFVHpXVgyegWYXg4zNFhXVxYJemmY",
+                              *mainChainParams),
+            DecodeDestination("1B3rBvdvFeB62gkx5TCsZArVinU3aGCZcd",
+                              *mainChainParams),
+            DecodeDestination("1D5bvwaJqvG9S682YFE31TQRjZSnkhE8cy",
+                              *mainChainParams),
+            DecodeDestination("1E8FhBAvKGZgthNerEg1qARvjCZ7n1z1CF",
+                              *mainChainParams),
+            DecodeDestination("1JzDc4tGXpPGzd4adtZaXB1U3n1DhgY2Fz",
+                              *mainChainParams),
+            DecodeDestination("1AzWf4mVDXyp7rsAbWBzjELhVXJHm6DkQt",
+                              *mainChainParams),
+            DecodeDestination("1PnzvGSUiF7ciZAiNnuqtW5RZtwdDW5VEn",
+                              *mainChainParams),
+            DecodeDestination("181uJF3Hf2LSMkigLoifmMiVQ53LU9akWQ",
+                              *mainChainParams),
+            DecodeDestination("1Egm467KP9nkg2byFy4ouvXC1qZGeVbEXL",
+                              *mainChainParams),
+            DecodeDestination("17uvG5teUQeYmj5Sa6whsWaWtM6TjbsVFn",
+                              *mainChainParams),
+            DecodeDestination("1NHXgWsUmViGnMhnyy5F9k4bHit8Z1UrHT",
+                              *mainChainParams),
+            DecodeDestination("1Avgd9nrPR6qVe6LBgsWYQxwWis5n2RhZc",
+                              *mainChainParams),
+            DecodeDestination("1422ciKobfkK2Zk3TpNSebmEBEtDHEP5nG",
+                              *mainChainParams),
+            DecodeDestination("1PFgereKm1twzDUjUySBH6ckQsNzGcfxxz",
+                              *mainChainParams),
+            DecodeDestination("161p4i14KBcTB8q368q4NeUr61nFJcWUDo",
+                              *mainChainParams),
+            DecodeDestination("12wdBApoi77BYCSdB3CNVW3GPcwQcjgnLv",
+                              *mainChainParams),
+            DecodeDestination("1JqyZ1ZyXGeuYVtW6Rdb3pUyr1Rzovjsai",
+                              *mainChainParams),
+            DecodeDestination("14atnie7YgFbNKqMt9XMuV6jGKRWpk3tiY",
+                              *mainChainParams),
+            DecodeDestination("14rv5nfgDzqvR8iwuxZwgzfdtdaNwHx4B9",
+                              *mainChainParams),
+            // hbpool
+            DecodeDestination("qrjc9yecwkldlhzys3euqz68f78s2wjxw5h6j9rqpq",
+                              *mainChainParams),
+            // waterhole
+            DecodeDestination("qzl8jth497mtckku404cadsylwanm3rfxsx0g38nwl",
+                              *mainChainParams),
+        };
+
+        Amount total = Amount::zero();
+        for (auto &o : block.vtx[0]->vout) {
+            CTxDestination address;
+            if (ExtractDestination(o.scriptPubKey, address) &&
+                whitelisted.find(address) != whitelisted.end()) {
+                // This is whitelisted.
+                total += o.nValue;
+            }
+        }
+
+        if (total < 6 * COIN) {
+            pindex->nStatus = pindex->nStatus.withFailed();
+            setDirtyBlockIndex.insert(pindex);
+            std::cout << "coinbase base base" << std::endl;
+            return state.DoS(100, false, REJECT_INVALID, "bad-cb-amount");
+        }
+    }
+
+    // If this is a deep reorg (a regorg of more than one block), preemptively
+    // mark the chain as parked. If it has enough work, it'll unpark
+    // automatically. We mark the block as parked at the very last minute so we
+    // can make sure everything is ready to be reorged if needed.
+    if (gArgs.GetBoolArg("-parkdeepreorg", true)) {
+        const CBlockIndex *pindexFork = chainActive.FindFork(pindex);
+        if (pindexFork && pindexFork->nHeight + 1 < pindex->nHeight) {
+            LogPrintf("Park block %s as it would cause a deep reorg.\n",
+                      pindex->GetBlockHash().ToString());
+            pindex->nStatus = pindex->nStatus.withParked();
+            setDirtyBlockIndex.insert(pindex);
+        }
     }
 
     // Header is valid/has work and the merkle tree is good.

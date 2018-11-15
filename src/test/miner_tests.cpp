@@ -8,6 +8,7 @@
 #include "chainparams.h"
 #include "coins.h"
 #include "config.h"
+#include "consensus/activation.h"
 #include "consensus/consensus.h"
 #include "consensus/merkle.h"
 #include "consensus/tx_verify.h"
@@ -703,8 +704,22 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity) {
     mempool.clear();
 
     TestPackageSelection(config, scriptPubKey, txFirst);
-
     fCheckpointsEnabled = true;
+
+    int64_t magneticAnomalyActivationTime =
+        config.GetChainParams().GetConsensus().magneticAnomalyActivationTime;
+
+    // Trick the median time past to activate magnetic anomaly.
+    for (int i = 0; i < CBlockIndex::nMedianTimeSpan; i++) {
+        // Trick the MedianTimePast.
+        chainActive.Tip()->GetAncestor(chainActive.Tip()->nHeight - i)->nTime =
+            magneticAnomalyActivationTime;
+    }
+
+    BOOST_CHECK(IsMagneticAnomalyEnabled(config, chainActive.Tip()));
+
+    SetMockTime(magneticAnomalyActivationTime + 1);
+    BlockAssembler(config).CreateNewBlock(scriptPubKey);
 }
 
 void CheckBlockMaxSize(const Config &config, uint64_t size, uint64_t expected) {

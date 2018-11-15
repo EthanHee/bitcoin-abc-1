@@ -30,7 +30,7 @@ class BIP68Test(BitcoinTestFramework):
 
     def set_test_params(self):
         self.num_nodes = 2
-        self.extra_args = [["-blockprioritypercentage=0"],
+        self.extra_args = [["-blockprioritypercentage=0", "-noparkdeepreorg"],
                            ["-blockprioritypercentage=0", "-acceptnonstdtxn=0"]]
 
         activation_time = self.options.magnetic_anomaly_time
