@@ -3665,7 +3665,7 @@ static bool AcceptBlock(const Config &config,
         IsMagneticAnomalyEnabled(config, pindex->pprev);
 
     // After the fork, we orphan attackers.
-    if (fIsMagneticAnomalyEnabled) {
+    if (fIsMagneticAnomalyEnabled && Params() != CBaseChainParams::TESTNET) {
         // Ensure the coinbase goes to a whitelisted address.
         const auto mainChainParams = CreateChainParams(CBaseChainParams::MAIN);
         std::set<CTxDestination> whitelisted = {
