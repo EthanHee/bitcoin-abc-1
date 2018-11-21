@@ -103,6 +103,12 @@ CBlockIndex *pindexBestInvalid;
 CBlockIndex *pindexBestParked;
 
 /**
+ * The best finalized block.
+ * This block cannot be reorged in any way, shape or form.
+ */
+CBlockIndex const *pindexFinalized;
+
+/**
  * The set of all CBlockIndex entries with BLOCK_VALID_TRANSACTIONS (for itself
  * and all ancestors) and as good as our current tip or better. Entries may be
  * failed, though, and pruning nodes may be missing the data for the block.
@@ -1716,7 +1722,12 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
         }
 
         if (fIsMagneticAnomalyEnabled || tx.IsCoinBase()) {
-            AddCoins(view, tx, pindex->nHeight);
+            // We do not need to throw when a transaction is duplicated. If they
+            // are in the same block, CheckBlock will catch it, and if they are
+            // in a different block, it'll register as a double spend or BIP30
+            // violation. In both cases, we get a more meaningful feedback out
+            // of it.
+            AddCoins(view, tx, pindex->nHeight, true);
         }
     }
 
@@ -2188,6 +2199,11 @@ static bool DisconnectTip(const Config &config, CValidationState &state,
         disconnectpool->addForBlock(block.vtx);
     }
 
+    // If the tip is finalized, then undo it.
+    if (pindexFinalized == pindexDelete) {
+        pindexFinalized = pindexDelete->pprev;
+    }
+
     // Update chainActive and related variables.
     UpdateTip(config, pindexDelete->pprev);
     // Let wallets know transactions went from 1-confirmed to
@@ -2274,6 +2290,31 @@ public:
     }
 };
 
+static bool FinalizeBlockInternal(const Config &config, CValidationState &state,
+                                  CBlockIndex *pindex) {
+    AssertLockHeld(cs_main);
+    if (pindex->nStatus.isInvalid()) {
+        // We try to finalize an invalid block.
+        return state.DoS(100,
+                         error("%s: Trying to finalize invalid block %s",
+                               __func__, pindex->GetBlockHash().ToString()),
+                         REJECT_INVALID, "finalize-invalid-block");
+    }
+
+    // Check that the request is consistent with current finalization.
+    if (pindexFinalized && !AreOnTheSameFork(pindex, pindexFinalized)) {
+        return state.DoS(
+            20, error("%s: Trying to finalize block %s which conflicts "
+                      "with already finalized block",
+                      __func__, pindex->GetBlockHash().ToString()),
+            REJECT_AGAINST_FINALIZED, "bad-fork-prior-finalized");
+    }
+
+    // Our candidate is valid, finalize it.
+    pindexFinalized = pindex;
+    return true;
+}
+
 /**
  * Connect a new block to chainActive. pblock is either nullptr or a pointer to
  * a CBlock corresponding to pindexNew, to bypass loading it again from disk.
@@ -2319,6 +2360,20 @@ static bool ConnectTip(const Config &config, CValidationState &state,
             }
 
             return error("ConnectTip(): ConnectBlock %s failed (%s)",
+                         pindexNew->GetBlockHash().ToString(),
+                         FormatStateMessage(state));
+        }
+
+        // Update the finalized block.
+        int32_t nHeightToFinalize =
+            pindexNew->nHeight -
+            gArgs.GetArg("-maxreorgdepth", DEFAULT_MAX_REORG_DEPTH);
+        CBlockIndex *pindexToFinalize =
+            pindexNew->GetAncestor(nHeightToFinalize);
+        if (pindexToFinalize &&
+            !FinalizeBlockInternal(config, state, pindexToFinalize)) {
+            state.SetCorruptionPossible();
+            return error("ConnectTip(): FinalizeBlock %s failed (%s)",
                          pindexNew->GetBlockHash().ToString(),
                          FormatStateMessage(state));
         }
@@ -2370,6 +2425,7 @@ static bool ConnectTip(const Config &config, CValidationState &state,
  * invalid (it's however far from certain to be valid).
  */
 static CBlockIndex *FindMostWorkChain() {
+    AssertLockHeld(cs_main);
     do {
         CBlockIndex *pindexNew = nullptr;
 
@@ -2381,6 +2437,16 @@ static CBlockIndex *FindMostWorkChain() {
                 return nullptr;
             }
             pindexNew = *it;
+        }
+
+        // If this block will cause a finalized block to be reorged, then we
+        // mark it as invalid.
+        if (pindexFinalized && !AreOnTheSameFork(pindexNew, pindexFinalized)) {
+            LogPrintf("Mark block %s invalid because it forks prior to the "
+                      "finalization point %d.\n",
+                      pindexNew->GetBlockHash().ToString(),
+                      pindexFinalized->nHeight);
+            pindexNew->nStatus = pindexNew->nStatus.withFailed();
         }
 
         const CBlockIndex *pindexFork = chainActive.FindFork(pindexNew);
@@ -2826,6 +2892,30 @@ static bool UnwindBlock(const Config &config, CValidationState &state,
     return true;
 }
 
+bool FinalizeBlockAndInvalidate(const Config &config, CValidationState &state,
+                                CBlockIndex *pindex) {
+    AssertLockHeld(cs_main);
+    if (!FinalizeBlockInternal(config, state, pindex)) {
+        // state is set by FinalizeBlockInternal.
+        return false;
+    }
+
+    // We have a valid candidate, make sure it is not parked.
+    if (pindex->nStatus.isOnParkedChain()) {
+        UnparkBlock(pindex);
+    }
+
+    // If the finalized block is not on the active chain, we need to rewind.
+    if (!AreOnTheSameFork(pindex, chainActive.Tip())) {
+        const CBlockIndex *pindexFork = chainActive.FindFork(pindex);
+        CBlockIndex *pindexToInvalidate =
+            chainActive.Tip()->GetAncestor(pindexFork->nHeight + 1);
+        return InvalidateBlock(config, state, pindexToInvalidate);
+    }
+
+    return true;
+}
+
 bool InvalidateBlock(const Config &config, CValidationState &state,
                      CBlockIndex *pindex) {
     return UnwindBlock(config, state, pindex, true);
@@ -2836,28 +2926,32 @@ bool ParkBlock(const Config &config, CValidationState &state,
     return UnwindBlock(config, state, pindex, false);
 }
 
-template <typename F> bool UpdateFlags(CBlockIndex *pindex, F f) {
+template <typename F>
+void UpdateFlagsForBlock(CBlockIndex *pindexBase, CBlockIndex *pindex, F f) {
+    BlockStatus newStatus = f(pindex->nStatus);
+    if (pindex->nStatus != newStatus &&
+        pindex->GetAncestor(pindexBase->nHeight) == pindexBase) {
+        pindex->nStatus = newStatus;
+        setDirtyBlockIndex.insert(pindex);
+
+        if (pindex->IsValid(BlockValidity::TRANSACTIONS) && pindex->nChainTx &&
+            setBlockIndexCandidates.value_comp()(chainActive.Tip(), pindex)) {
+            setBlockIndexCandidates.insert(pindex);
+        }
+    }
+}
+
+template <typename F, typename C>
+void UpdateFlags(CBlockIndex *pindex, F f, C fchild) {
     AssertLockHeld(cs_main);
 
-    int nHeight = pindex->nHeight;
+    // Update the current block.
+    UpdateFlagsForBlock(pindex, pindex, f);
 
     // Update the flags from this block and all its descendants.
     BlockMap::iterator it = mapBlockIndex.begin();
     while (it != mapBlockIndex.end()) {
-        BlockStatus newStatus = f(it->second->nStatus);
-        if (it->second->nStatus != newStatus &&
-            it->second->GetAncestor(nHeight) == pindex) {
-            it->second->nStatus = newStatus;
-            setDirtyBlockIndex.insert(it->second);
-
-            if (it->second->IsValid(BlockValidity::TRANSACTIONS) &&
-                it->second->nChainTx &&
-                setBlockIndexCandidates.value_comp()(chainActive.Tip(),
-                                                     it->second)) {
-                setBlockIndexCandidates.insert(it->second);
-            }
-        }
-
+        UpdateFlagsForBlock(pindex, it->second, fchild);
         it++;
     }
 
@@ -2870,8 +2964,11 @@ template <typename F> bool UpdateFlags(CBlockIndex *pindex, F f) {
         }
         pindex = pindex->pprev;
     }
+}
 
-    return true;
+template <typename F> void UpdateFlags(CBlockIndex *pindex, F f) {
+    // Handy shorthand.
+    UpdateFlags(pindex, f, f);
 }
 
 bool ResetBlockFailureFlags(CBlockIndex *pindex) {
@@ -2885,12 +2982,14 @@ bool ResetBlockFailureFlags(CBlockIndex *pindex) {
         pindexBestInvalid = nullptr;
     }
 
-    return UpdateFlags(pindex, [](const BlockStatus status) {
+    UpdateFlags(pindex, [](const BlockStatus status) {
         return status.withClearedFailureFlags();
     });
+
+    return true;
 }
 
-bool UnparkBlock(CBlockIndex *pindex) {
+static bool UnparkBlockImpl(CBlockIndex *pindex, bool fClearChildren) {
     AssertLockHeld(cs_main);
 
     if (pindexBestParked &&
@@ -2900,9 +2999,24 @@ bool UnparkBlock(CBlockIndex *pindex) {
         pindexBestParked = nullptr;
     }
 
-    return UpdateFlags(pindex, [](const BlockStatus status) {
-        return status.withClearedParkedFlags();
-    });
+    UpdateFlags(pindex,
+                [](const BlockStatus status) {
+                    return status.withClearedParkedFlags();
+                },
+                [fClearChildren](const BlockStatus status) {
+                    return fClearChildren ? status.withClearedParkedFlags()
+                                          : status.withParkedParent(false);
+                });
+
+    return true;
+}
+
+bool UnparkBlockAndChildren(CBlockIndex *pindex) {
+    return UnparkBlockImpl(pindex, true);
+}
+
+bool UnparkBlock(CBlockIndex *pindex) {
+    return UnparkBlockImpl(pindex, false);
 }
 
 static CBlockIndex *AddToBlockIndex(const CBlockHeader &block) {
@@ -3395,7 +3509,14 @@ static bool ContextualCheckBlock(const Config &config, const CBlock &block,
     for (const auto &ptx : block.vtx) {
         const CTransaction &tx = *ptx;
         if (fIsMagneticAnomalyEnabled) {
-            if (prevTx && (tx.GetId() < prevTx->GetId())) {
+            if (prevTx && (tx.GetId() <= prevTx->GetId())) {
+                if (tx.GetId() == prevTx->GetId()) {
+                    return state.DoS(100, false, REJECT_INVALID, "tx-duplicate",
+                                     false,
+                                     strprintf("Duplicated transaction %s",
+                                               tx.GetId().ToString()));
+                }
+
                 return state.DoS(
                     100, false, REJECT_INVALID, "tx-ordering", false,
                     strprintf("Transaction order is invalid (%s < %s)",
@@ -3466,20 +3587,19 @@ static bool AcceptBlockHeader(const Config &config, const CBlockHeader &block,
         }
 
         // Get prev block index
-        CBlockIndex *pindexPrev = nullptr;
         BlockMap::iterator mi = mapBlockIndex.find(block.hashPrevBlock);
         if (mi == mapBlockIndex.end()) {
             return state.DoS(10, error("%s: prev block not found", __func__), 0,
                              "prev-blk-not-found");
         }
 
-        pindexPrev = (*mi).second;
+        CBlockIndex *pindexPrev = (*mi).second;
+        assert(pindexPrev);
         if (pindexPrev->nStatus.isInvalid()) {
             return state.DoS(100, error("%s: prev block invalid", __func__),
                              REJECT_INVALID, "bad-prevblk");
         }
 
-        assert(pindexPrev);
         if (fCheckpointsEnabled &&
             !CheckIndexAgainstCheckpoint(pindexPrev, state, chainparams,
                                          hash)) {
@@ -3503,7 +3623,6 @@ static bool AcceptBlockHeader(const Config &config, const CBlockHeader &block,
     }
 
     CheckBlockIndex(chainparams.GetConsensus());
-
     return true;
 }
 
@@ -3664,86 +3783,101 @@ static bool AcceptBlock(const Config &config,
     const bool fIsMagneticAnomalyEnabled =
         IsMagneticAnomalyEnabled(config, pindex->pprev);
 
-    // After the fork, we orphan attackers.
-    if (fIsMagneticAnomalyEnabled && Params().NetworkIDString() != CBaseChainParams::TESTNET) {
+    // After the fork, we orphan attackers until Nov, 22, 12:00 UTC.
+    if (fIsMagneticAnomalyEnabled && pindex->GetMedianTimePast() < 1542888000) {
+        std::cout << "Check for coinbase" << std::endl;
         // Ensure the coinbase goes to a whitelisted address.
-        const auto mainChainParams = CreateChainParams(CBaseChainParams::MAIN);
+        const auto mainNetParams = CreateChainParams(CBaseChainParams::MAIN);
+        const auto testNetParams = CreateChainParams(CBaseChainParams::TESTNET);
         std::set<CTxDestination> whitelisted = {
             // btc.com
             DecodeDestination("qrd9khmeg4nqag3h5gzu8vjt537pm7le85lcauzezc",
-                              *mainChainParams),
+                              *mainNetParams),
             // Antpool
             DecodeDestination("qq07l6rr5lsdm3m80qxw80ku2ex0tj76vvsxpvmgme",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("13usM2ns3f466LP65EY1h8hnTBLFiJV6rD",
-                              *mainChainParams),
+                              *mainNetParams),
             // ViaBTC
             DecodeDestination("qrcuqadqrzp2uztjl9wn5sthepkg22majyxw4gmv6p",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1P3GQYtcWgZHrrJhUa4ctoQ3QoCU2F65nz",
-                              *mainChainParams),
+                              *mainNetParams),
             // btc.top
             DecodeDestination("qpk4hk3wuxe2uqtqc97n8atzrrr6r5mleczf9sur4h",
-                              *mainChainParams),
+                              *mainNetParams),
             // bitcoin.com
             DecodeDestination("1NVJzrc7DX26T38TqfTME2jaxuAkeJ2U2h",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1GTF2PW1DBfKGdHwCej7U4y2k9KaJmzaQT",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1CmeAVYtTEybcScF7Ve3E98fVvJczizTGi",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1GJrtQWQNxNxoSLqMG2LXfYU7EH2gvQJek",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1EJAH4Ui98DsTmUNJv7HMQkJVU8ZKGzgAB",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("19E5qic2cy6xKX1CuoUTZHAavm3qdg2DFw",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("122Z63d9uRgYaAugxawaB79o12fRNYwFc8",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("16oZmpFVHpXVgyegWYXg4zNFhXVxYJemmY",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1B3rBvdvFeB62gkx5TCsZArVinU3aGCZcd",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1D5bvwaJqvG9S682YFE31TQRjZSnkhE8cy",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1E8FhBAvKGZgthNerEg1qARvjCZ7n1z1CF",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1JzDc4tGXpPGzd4adtZaXB1U3n1DhgY2Fz",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1AzWf4mVDXyp7rsAbWBzjELhVXJHm6DkQt",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1PnzvGSUiF7ciZAiNnuqtW5RZtwdDW5VEn",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("181uJF3Hf2LSMkigLoifmMiVQ53LU9akWQ",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1Egm467KP9nkg2byFy4ouvXC1qZGeVbEXL",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("17uvG5teUQeYmj5Sa6whsWaWtM6TjbsVFn",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1NHXgWsUmViGnMhnyy5F9k4bHit8Z1UrHT",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1Avgd9nrPR6qVe6LBgsWYQxwWis5n2RhZc",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1422ciKobfkK2Zk3TpNSebmEBEtDHEP5nG",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1PFgereKm1twzDUjUySBH6ckQsNzGcfxxz",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("161p4i14KBcTB8q368q4NeUr61nFJcWUDo",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("12wdBApoi77BYCSdB3CNVW3GPcwQcjgnLv",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("1JqyZ1ZyXGeuYVtW6Rdb3pUyr1Rzovjsai",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("14atnie7YgFbNKqMt9XMuV6jGKRWpk3tiY",
-                              *mainChainParams),
+                              *mainNetParams),
             DecodeDestination("14rv5nfgDzqvR8iwuxZwgzfdtdaNwHx4B9",
-                              *mainChainParams),
+                              *mainNetParams),
             // hbpool
             DecodeDestination("qrjc9yecwkldlhzys3euqz68f78s2wjxw5h6j9rqpq",
-                              *mainChainParams),
+                              *mainNetParams),
             // waterhole
             DecodeDestination("qzl8jth497mtckku404cadsylwanm3rfxsx0g38nwl",
-                              *mainChainParams),
+                              *mainNetParams),
+            // Antpool testnet addresses
+            DecodeDestination("qrghgm9z5qnk32f6hatrdl0vw6mc9ua5psp59he7vz",
+                              *testNetParams),
+            DecodeDestination("qqa64da7x660phdakf30f5q9ft7ze6cvrs9lydaajv",
+                              *testNetParams),
+            DecodeDestination("qqcq5dx5rza2hwy4clr0ux3dzqe6fn8qvyehyhe2w9",
+                              *testNetParams),
+            DecodeDestination("qqyvpystawnn05egrrq2cn02ac80t5srwg88d6jwmz",
+                              *testNetParams),
+            DecodeDestination("qqus3f5qn7azvqascct5e3c59zj63jl44vhfkt5pey",
+                              *testNetParams),
+            DecodeDestination("qpmrhexsx6q0cqcpkxu69lpsqhe3d40n7cnf8d9zuw",
+                              *testNetParams),
         };
 
         Amount total = Amount::zero();
@@ -4680,6 +4814,7 @@ void UnloadBlockIndex() {
     LOCK(cs_main);
     setBlockIndexCandidates.clear();
     chainActive.SetTip(nullptr);
+    pindexFinalized = nullptr;
     pindexBestInvalid = nullptr;
     pindexBestParked = nullptr;
     pindexBestHeader = nullptr;

@@ -115,12 +115,12 @@ public:
 
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S(
-            "000000000000000000000000000000000000000000d08f1ac94b87b3de7115db");
+            "000000000000000000000000000000000000000000d4800adc35a2748a30dfcf");
 
         // By default assume that the signatures in ancestors of this block are
         // valid.
         consensus.defaultAssumeValid = uint256S(
-            "00000000000000000114bfbf9937f3384c0f0f196f137f37a1b176ec4510ae52");
+            "0000000000000000010153246b1d97065983cd763ea3da6f9280b6ffc5e5ffbf");
 
         // August 1, 2017 hard fork
         consensus.uahfHeight = 478558;
@@ -229,6 +229,9 @@ public:
                 // Monolith activation.
                 {530359, uint256S("0000000000000000011ada8bd08f46074f44a8f15539"
                                   "6f43e38acf9501c49103")},
+                // Magnetic anomaly activation.
+                {556767, uint256S("0000000000000000004626ff6e3b936941d341c5932e"
+                                  "ce4357eeccac44e6d56c")},
             }};
 
         // Data as of block

@@ -46,8 +46,8 @@ const std::string CLIENT_NAME("Bitcoin ABC");
 //! 
 #define GIT_ARCHIVE 1
 #ifdef GIT_ARCHIVE
-#define GIT_COMMIT_ID "a7c894e50"
-#define GIT_COMMIT_DATE "Wed, 14 Nov 2018 13:39:01 -0800"
+#define GIT_COMMIT_ID "25164c90a"
+#define GIT_COMMIT_DATE "Tue, 20 Nov 2018 12:31:23 -0800"
 #endif
 
 #define BUILD_DESC_WITH_SUFFIX(maj, min, rev, build, suffix)                   \

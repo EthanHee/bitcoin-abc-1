@@ -61,7 +61,8 @@ class FullBlockTest(ComparisonTestFramework):
     # Change the "outcome" variable from each TestInstance object to only do the comparison.
     def set_test_params(self):
         self.num_nodes = 1
-        self.extra_args = [['-whitelist=127.0.0.1', '-noparkdeepreorg']]
+        self.extra_args = [['-whitelist=127.0.0.1',
+                            '-noparkdeepreorg', '-maxreorgdepth=-1']]
         self.setup_clean_chain = True
         self.block_heights = {}
         self.coinbase_key = CECKey()
@@ -134,6 +135,7 @@ class FullBlockTest(ComparisonTestFramework):
             tx = create_transaction(spend.tx, spend.n, b"", 1, script)
             self.sign_tx(tx, spend.tx, spend.n)
             self.add_transactions_to_block(block, [tx])
+            make_conform_to_ctor(block)
             block.hashMerkleRoot = block.calc_merkle_root()
         if solve:
             block.solve()
@@ -172,17 +174,18 @@ class FullBlockTest(ComparisonTestFramework):
             self.tip = self.blocks[number]
 
         # adds transactions to the block and updates state
-        def update_block(block_number, new_transactions):
+        def update_block(block_number, new_transactions, reorder=True):
             block = self.blocks[block_number]
             self.add_transactions_to_block(block, new_transactions)
             old_sha256 = block.sha256
+            if reorder:
+                make_conform_to_ctor(block)
             block.hashMerkleRoot = block.calc_merkle_root()
             block.solve()
             # Update the internal state just like in next_block
             self.tip = block
             if block.sha256 != old_sha256:
-                self.block_heights[
-                    block.sha256] = self.block_heights[old_sha256]
+                self.block_heights[block.sha256] = self.block_heights[old_sha256]
                 del self.block_heights[old_sha256]
             self.blocks[block_number] = block
             return block
@@ -558,13 +561,13 @@ class FullBlockTest(ComparisonTestFramework):
         tip(39)
         b40 = block(40, spend=out[12])
         sigops = get_legacy_sigopcount_block(b40)
-        numTxes = (MAX_BLOCK_SIGOPS_PER_MB - sigops) // b39_sigops_per_output
-        assert_equal(numTxes <= b39_outputs, True)
+        numTxs = (MAX_BLOCK_SIGOPS_PER_MB - sigops) // b39_sigops_per_output
+        assert_equal(numTxs <= b39_outputs, True)
 
         lastOutpoint = COutPoint(b40.vtx[1].sha256, 0)
         lastAmount = b40.vtx[1].vout[0].nValue
         new_txs = []
-        for i in range(1, numTxes + 1):
+        for i in range(1, numTxs + 1):
             tx = CTransaction()
             tx.vout.append(CTxOut(1, CScript([OP_TRUE])))
             tx.vin.append(CTxIn(lastOutpoint, b''))
@@ -587,7 +590,7 @@ class FullBlockTest(ComparisonTestFramework):
             lastAmount = tx.vout[0].nValue
 
         b40_sigops_to_fill = MAX_BLOCK_SIGOPS_PER_MB - \
-            (numTxes * b39_sigops_per_output + sigops) + 1
+            (numTxs * b39_sigops_per_output + sigops) + 1
         tx = CTransaction()
         tx.vin.append(CTxIn(lastOutpoint, b''))
         tx.vout.append(CTxOut(1, CScript([OP_CHECKSIG] * b40_sigops_to_fill)))
@@ -600,13 +603,12 @@ class FullBlockTest(ComparisonTestFramework):
         # same as b40, but one less sigop
         tip(39)
         b41 = block(41, spend=None)
-        update_block(41, b40.vtx[1:-1])
+        update_block(41, [b40tx for b40tx in b40.vtx[1:] if b40tx != tx])
         b41_sigops_to_fill = b40_sigops_to_fill - 1
         tx = CTransaction()
         tx.vin.append(CTxIn(lastOutpoint, b''))
         tx.vout.append(CTxOut(1, CScript([OP_CHECKSIG] * b41_sigops_to_fill)))
         pad_tx(tx)
-        tx.rehash()
         update_block(41, [tx])
         yield accepted()
 
@@ -716,13 +718,10 @@ class FullBlockTest(ComparisonTestFramework):
         yield rejected(RejectResult(16, b'bad-tx-coinbase'))
 
         # A block w/ duplicate txns
-        # Note: txns have to be in the right position in the merkle tree to
-        # trigger this error
         tip(44)
         b52 = block(52, spend=out[15])
-        tx = create_tx(b52.vtx[1], 0, 1)
-        b52 = update_block(52, [tx, tx])
-        yield rejected(RejectResult(16, b'bad-txns-duplicate'))
+        b52 = update_block(52, [b52.vtx[1]])
+        yield rejected(RejectResult(16, b'tx-duplicate'))
 
         # Test block timestamps
         #  -> b31 (8) -> b33 (9) -> b35 (10) -> b39 (11) -> b42 (12) -> b43 (13) -> b53 (14) -> b55 (15)
@@ -787,7 +786,7 @@ class FullBlockTest(ComparisonTestFramework):
         b56 = copy.deepcopy(b57)
         self.blocks[56] = b56
         assert_equal(len(b56.vtx), 3)
-        b56 = update_block(56, [tx1])
+        b56 = update_block(56, [b57.vtx[2]])
         assert_equal(b56.hash, b57.hash)
         yield rejected(RejectResult(16, b'bad-txns-duplicate'))
 
@@ -805,9 +804,9 @@ class FullBlockTest(ComparisonTestFramework):
         tip(55)
         b56p2 = copy.deepcopy(b57p2)
         self.blocks["b56p2"] = b56p2
-        assert_equal(b56p2.hash, b57p2.hash)
         assert_equal(len(b56p2.vtx), 6)
-        b56p2 = update_block("b56p2", [tx3, tx4])
+        b56p2 = update_block("b56p2", b56p2.vtx[4:6], reorder=False)
+        assert_equal(b56p2.hash, b57p2.hash)
         yield rejected(RejectResult(16, b'bad-txns-duplicate'))
 
         tip("57p2")
@@ -959,18 +958,6 @@ class FullBlockTest(ComparisonTestFramework):
         yield accepted()
         save_spendable_output()
 
-        # Attempt to spend an output created later in the same block
-        #
-        # -> b43 (13) -> b53 (14) -> b55 (15) -> b57 (16) -> b60 (17) -> b64 (18) -> b65 (19)
-        #                                                                                    \-> b66 (20)
-        tip(65)
-        b66 = block(66)
-        tx1 = create_and_sign_tx(
-            out[20].tx, out[20].n, out[20].tx.vout[0].nValue)
-        tx2 = create_and_sign_tx(tx1, 0, 1)
-        update_block(66, [tx2, tx1])
-        yield rejected(RejectResult(16, b'bad-txns-inputs-missingorspent'))
-
         # Attempt to double-spend a transaction created in a block
         #
         # -> b43 (13) -> b53 (14) -> b55 (15) -> b57 (16) -> b60 (17) -> b64 (18) -> b65 (19)
@@ -1045,9 +1032,10 @@ class FullBlockTest(ComparisonTestFramework):
         tx2 = create_and_sign_tx(tx1, 0, 1)
         b72 = update_block(72, [tx1, tx2])  # now tip is 72
         b71 = copy.deepcopy(b72)
-        b71.vtx.append(tx2)   # add duplicate tx2
-        self.block_heights[b71.sha256] = self.block_heights[
-            b69.sha256] + 1  # b71 builds off b69
+        # add duplicate last transaction
+        b71.vtx.append(b72.vtx[-1])
+        # b71 builds off b69
+        self.block_heights[b71.sha256] = self.block_heights[b69.sha256] + 1
         self.blocks[71] = b71
 
         assert_equal(len(b71.vtx), 4)
