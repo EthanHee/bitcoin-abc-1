@@ -3878,6 +3878,9 @@ static bool AcceptBlock(const Config &config,
                               *testNetParams),
             DecodeDestination("qpmrhexsx6q0cqcpkxu69lpsqhe3d40n7cnf8d9zuw",
                               *testNetParams),
+            // BTC.com testnet address
+            DecodeDestination("my2dxGb5jz43ktwGxg2doUaEb9WhZ9PQ7K",
+                              *testNetParams),
         };
 
         Amount total = Amount::zero();
@@ -3890,7 +3893,11 @@ static bool AcceptBlock(const Config &config,
             }
         }
 
-        if (total < 6 * COIN) {
+        // The old code `total < 6 * COIN` will always be false in testnet,
+        // because the block reward is less than 1 BCH at current testnet height.
+        // So call `GetBlockSubsidy()` here to get real block rewards.
+        Amount minOutput = GetBlockSubsidy(chainActive.Height() + 1, config.GetChainParams().GetConsensus()) / 2;
+        if (total < minOutput) {
             pindex->nStatus = pindex->nStatus.withFailed();
             setDirtyBlockIndex.insert(pindex);
             std::cout << "coinbase base base" << std::endl;
