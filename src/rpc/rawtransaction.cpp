@@ -1480,7 +1480,7 @@ static UniValue fillmempool(const Config &config,
         CFeeRate minRelayTxFee = config.GetMinFeePerKB();
         Amount feePerK = minRelayTxFee.GetFeePerK();
         const int assumedTxoutPerKb = 20;
-        int64_t relayFeePerTxout = std::max((int64_t)200, OUTPUT_PER_INPUT * feePerK / SATOSHI / assumedTxoutPerKb);
+        int64_t relayFeePerTxout = std::max((int64_t)200, OUTPUT_PER_INPUT * feePerK / assumedTxoutPerKb / SATOSHI);
 
         while(startingUnspentIdx < unspentList.size() && rawHxTxs.size() < totalTxs)
         {
