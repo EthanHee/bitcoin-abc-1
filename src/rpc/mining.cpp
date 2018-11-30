@@ -635,11 +635,9 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
     static CBlockIndex *pindexPrev;
     //static int64_t nStart;
     static std::unique_ptr<CBlockTemplate> pblocktemplate;
-    // if (pindexPrev != chainActive.Tip() ||
-    //     (mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast &&
-    //      GetTime() - nStart > 5)) {
-    // disable cache
-    if(true) {
+    if (pindexPrev != chainActive.Tip() ||
+        (mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast &&
+         GetTime() - nStart > 5)) {
         // Clear pindexPrev so future calls make a new block, despite any
         // failures from here on
         pindexPrev = nullptr;
@@ -690,7 +688,6 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
     aCaps.push_back("proposal");
 
     uint160 jobId;  //  light version
-    uint32_t totalTxNoCoinbase = 0;
     UniValue merklebranch(UniValue::VARR);  //  light version
     UniValue transactions(UniValue::VARR);
     if(lightVersion)
@@ -705,7 +702,6 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
             }
             vtxhashsNoCoinbase.push_back(txId);
         }        
-        totalTxNoCoinbase = vtxhashsNoCoinbase.size();
         // merkle branch, merkleBranch_ could be empty
         // make merkleSteps and merkle branch
         std::vector<uint256> merkleSteps;
@@ -812,14 +808,37 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
 
     if(lightVersion)
     {
-        if(pblock->vtx.size() > 0)
+        std::vector<CTransactionRef> storeTxs;
+        auto vtxIterAfterCoinbase = std::next(pblock->vtx.begin());
+        storeTxs.insert(storeTxs.begin(), vtxIterAfterCoinbase, pblock->vtx.end());
+
+        const std::string jobIdStr = jobId.GetHex();
+        fs::path outputFile = GetblocktemplatelightDataDir();
+        outputFile += jobIdStr;
+        if(!fs::exists(outputFile))
         {
-            if (pblock->vtx[0]->IsCoinBase()) {
-                pblock->vtx.erase(pblock->vtx.begin());
+            CDataStream datastream(SER_DISK, PROTOCOL_VERSION);
+
+            datastream << (uint32_t)storeTxs.size();
+            for (const auto &it : storeTxs) {
+                const CTransaction &tx = *it;
+                datastream << tx;
+            }
+
+            fs::ofstream ofile(outputFile);
+            if(ofile.is_open())
+            {
+                ofile << "GBT";
+                ofile.write(datastream.data(), datastream.size());
+                ofile << "GBT";
+                LogPrintf("getblocktemplatelight written to %s", outputFile.string().c_str());
+            }
+            else
+            {
+                LogPrintf("getblocktemplatelight cannot write tx data to %s", outputFile.string().c_str());
             }
         }
 
-        const std::string jobIdStr = jobId.GetHex();
         {
             LOCK(cs_getblocktemplatelight);
             if((int)gGetblocktemplatelightCacheMap.size() >= GetblocktemplatelightCacheSize()) //  limit the total cache
@@ -835,32 +854,7 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
                 gGetblocktemplatelightIdList.erase(removeJobIdIter);
             }
             gGetblocktemplatelightIdList.push_back(jobIdStr);
-            gGetblocktemplatelightCacheMap[jobIdStr] = std::move(pblock->vtx);
-        }
-
-        fs::path outputFile = GetblocktemplatelightDataDir();
-        outputFile += jobIdStr;
-        if(!fs::exists(outputFile))
-        {
-            CDataStream datastream(SER_DISK, PROTOCOL_VERSION);
-
-            datastream << totalTxNoCoinbase;
-            for (const auto &it : pblock->vtx) {
-                const CTransaction &tx = *it;
-                datastream << tx;
-            }
-
-            fs::ofstream ofile(outputFile);
-            if(ofile.is_open())
-            {
-                ofile << "GBT";
-                ofile.write(datastream.data(), datastream.size());
-                ofile << "GBT";
-            }
-            else
-            {
-                LogPrintf("getblocktemplatelight cannot write tx data to %s", outputFile.string().c_str());
-            }
+            gGetblocktemplatelightCacheMap[jobIdStr] = std::move(storeTxs);
         }
     }
 
