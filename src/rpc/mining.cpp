@@ -633,7 +633,7 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
 
     // Update block
     static CBlockIndex *pindexPrev;
-    //static int64_t nStart;
+    static int64_t nStart;
     static std::unique_ptr<CBlockTemplate> pblocktemplate;
     if (pindexPrev != chainActive.Tip() ||
         (mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast &&
