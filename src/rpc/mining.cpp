@@ -12,6 +12,7 @@
 #include "consensus/consensus.h"
 #include "consensus/params.h"
 #include "consensus/validation.h"
+#include "consensus/activation.h"
 #include "core_io.h"
 #include "dstencode.h"
 #include "init.h"
@@ -632,11 +633,12 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
 
     // Update block
     static CBlockIndex *pindexPrev;
-    static int64_t nStart;
+    //static int64_t nStart;
     static std::unique_ptr<CBlockTemplate> pblocktemplate;
     // if (pindexPrev != chainActive.Tip() ||
     //     (mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast &&
     //      GetTime() - nStart > 5)) {
+    // disable cache
     if(true) {
         // Clear pindexPrev so future calls make a new block, despite any
         // failures from here on
@@ -645,7 +647,7 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
         // Store the pindexBest used before CreateNewBlock, to avoid races
         nTransactionsUpdatedLast = g_mempool.GetTransactionsUpdated();
         CBlockIndex *pindexPrevNew = chainActive.Tip();
-        nStart = GetTime();
+        //nStart = GetTime();
 
         // Create new block
         CScript scriptDummy = CScript() << OP_TRUE;
@@ -661,14 +663,22 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
 
     // pointer for convenience
     CBlock *pblock = &pblocktemplate->block;
-    const Consensus::Params &consensusParams =
-        config.GetChainParams().GetConsensus();
+    //const Consensus::Params &consensusParams =
+    //    config.GetChainParams().GetConsensus();
     //  inject BTC.COM extra transactions
     if(!injectTxs.empty())
     {
         for(auto& tx : injectTxs)
         {
             pblock->vtx.push_back(MakeTransactionRef(std::move(tx)));            
+        }
+        if (IsMagneticAnomalyEnabled(config, pindexPrev)) {
+            // If magnetic anomaly is enabled, we make sure transaction are canonically ordered.
+            std::sort(std::begin(pblock->vtx) + 1, std::end(pblock->vtx),
+                    [](const std::shared_ptr<const CTransaction> &a, const std::shared_ptr<const CTransaction> &b) -> bool {
+                        // The hash is a little endian uint8_t[256] in memory, so a < b is ordered by ascending.
+                        return a->GetId() < b->GetId();
+                    });
         }
     }
 
