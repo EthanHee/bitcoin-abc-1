@@ -137,8 +137,6 @@ public:
                     unsigned int _entryHeight, Amount _inChainInputValue,
                     bool spendsCoinbase, int64_t nSigOpsCost, LockPoints lp);
 
-    CTxMemPoolEntry(const CTxMemPoolEntry &other);
-
     const CTransaction &GetTx() const { return *this->tx; }
     CTransactionRef GetSharedTx() const { return this->tx; }
     /**
@@ -234,7 +232,7 @@ private:
 };
 
 struct update_fee_delta {
-    update_fee_delta(Amount _feeDelta) : feeDelta(_feeDelta) {}
+    explicit update_fee_delta(Amount _feeDelta) : feeDelta(_feeDelta) {}
 
     void operator()(CTxMemPoolEntry &e) { e.UpdateFeeDelta(feeDelta); }
 
@@ -243,7 +241,7 @@ private:
 };
 
 struct update_lock_points {
-    update_lock_points(const LockPoints &_lp) : lp(_lp) {}
+    explicit update_lock_points(const LockPoints &_lp) : lp(_lp) {}
 
     void operator()(CTxMemPoolEntry &e) { e.UpdateLockPoints(lp); }
 
@@ -353,8 +351,6 @@ struct descendant_score {};
 struct entry_time {};
 struct mining_score {};
 struct ancestor_score {};
-
-class CBlockPolicyEstimator;
 
 /**
  * Information about a mempool transaction.
@@ -494,7 +490,6 @@ private:
     //!< Value n means that n times in 2^32 we check.
     uint32_t nCheckFrequency;
     unsigned int nTransactionsUpdated;
-    CBlockPolicyEstimator *minerPolicyEstimator;
 
     //!< sum of all mempool tx's virtual sizes.
     uint64_t totalTxSize;
@@ -598,6 +593,9 @@ public:
     // to track size/count of descendant transactions. First version of
     // addUnchecked can be used to have it call CalculateMemPoolAncestors(), and
     // then invoke the second version.
+    // Note that addUnchecked is ONLY called from ATMP outside of tests
+    // and any other callers may break wallet's in-mempool tracking (due to
+    // lack of CValidationInterface::TransactionAddedToMempool callbacks).
     bool addUnchecked(const uint256 &hash, const CTxMemPoolEntry &entry,
                       bool validFeeEstimate = true);
     bool addUnchecked(const uint256 &hash, const CTxMemPoolEntry &entry,
@@ -682,7 +680,7 @@ public:
      * Assumes that setDescendants includes all in-mempool descendants of
      * anything already in it.
      */
-    void CalculateDescendants(txiter it, setEntries &setDescendants);
+    void CalculateDescendants(txiter it, setEntries &setDescendants) const;
 
     /**
      * The minimum fee to get into the mempool, which may itself not be enough
@@ -725,7 +723,7 @@ public:
         return mapTx.size();
     }
 
-    uint64_t GetTotalTxSize() {
+    uint64_t GetTotalTxSize() const {
         LOCK(cs);
         return totalTxSize;
     }
@@ -745,20 +743,7 @@ public:
     TxMempoolInfo info(const uint256 &hash) const;
     std::vector<TxMempoolInfo> infoAll() const;
 
-    /**
-     * Estimate fee rate needed to get into the next nBlocks. If no answer can
-     * be given at nBlocks, return an estimate at the lowest number of blocks
-     * where one can be given.
-     */
-    CFeeRate estimateSmartFee(int nBlocks,
-                              int *answerFoundAtBlocks = nullptr) const;
-
-    /** Estimate fee rate needed to get into the next nBlocks */
-    CFeeRate estimateFee(int nBlocks) const;
-
-    /** Write/Read estimates to disk */
-    bool WriteFeeEstimates(CAutoFile &fileout) const;
-    bool ReadFeeEstimates(CAutoFile &filein);
+    CFeeRate estimateFee() const;
 
     size_t DynamicMemoryUsage() const;
 
@@ -806,9 +791,8 @@ private:
      * transaction that is removed, so we can't remove intermediate transactions
      * in a chain before we've updated all the state for the removal.
      */
-    void removeUnchecked(
-        txiter entry,
-        MemPoolRemovalReason reason = MemPoolRemovalReason::UNKNOWN);
+    void removeUnchecked(txiter entry, MemPoolRemovalReason reason =
+                                           MemPoolRemovalReason::UNKNOWN);
 };
 
 /**
@@ -851,6 +835,10 @@ struct TxCoinAgePriorityCompare {
  * Instead, store the disconnected transactions (in order!) as we go, remove any
  * that are included in blocks in the new chain, and then process the remaining
  * still-unconfirmed transactions at the end.
+ *
+ * It also enables efficient reprocessing of current mempool entries, useful
+ * when (de)activating forks that result in in-mempool transactions becoming
+ * invalid
  */
 // multi_index tag names
 struct txid_index {};
@@ -901,6 +889,11 @@ public:
         return queuedTx;
     }
 
+    // Import mempool entries in topological order into queuedTx and clear the
+    // mempool. Caller should call updateMempoolForReorg to reprocess these
+    // transactions
+    void importMempool(CTxMemPool &pool);
+
     // Add entries for a block while reconstructing the topological ordering so
     // they can be added back to the mempool simply.
     void addForBlock(const std::vector<CTransactionRef> &vtx);
@@ -926,6 +919,8 @@ public:
         cachedInnerUsage -= RecursiveDynamicUsage(*entry);
         queuedTx.get<insertion_order>().erase(entry);
     }
+
+    bool isEmpty() const { return queuedTx.empty(); }
 
     void clear() {
         cachedInnerUsage = 0;

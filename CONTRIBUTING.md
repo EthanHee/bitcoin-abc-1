@@ -64,7 +64,9 @@ Here are some handy links for development practices aligned with Bitcoin ABC:
 
 - [Developer Notes](doc/developer-notes.md)
 - [Statement of Bitcoin ABC Values and Visions](https://www.yours.org/content/bitcoin-abc---our-values-and-vision-a282afaade7c)
-- How to Do Code Reviews Like a Human [Part 1](https://mtlynch.io/human-code-reviews-1/) [Part 2](https://mtlynch.io/human-code-reviews-2/)
+- [How to Do Code Reviews Like a Human - Part 1](https://mtlynch.io/human-code-reviews-1/) 
+- [How to Do Code Reviews Like a Human - Part 2](https://mtlynch.io/human-code-reviews-2/)
+- [Adversarial vs Collaborative Communication Styles](http://www.nehrlich.com/blog/2008/05/23/adversarial-vs-collaborative-communication-styles/)
 - [Large Diffs Are Hurting Your Ability To Ship](https://medium.com/@kurtisnusbaum/large-diffs-are-hurting-your-ability-to-ship-e0b2b41e8acf)
 - [Stacked Diffs: Keeping Phabricator Diffs Small](https://medium.com/@kurtisnusbaum/stacked-diffs-keeping-phabricator-diffs-small-d9964f4dcfa6)
 - [Parallel Implementations](https://www.gamasutra.com/view/news/128325/Opinion_Parallel_Implementations.php)
@@ -76,16 +78,16 @@ Here are some handy links for development practices aligned with Bitcoin ABC:
 Getting set up with the Bitcoin ABC Repository
 ----------------------------------------------
 
-1. Create an account at `https://reviews.bitcoinabc.org/`
+1. Create an account at https://reviews.bitcoinabc.org/
 
 2. Install Git and Arcanist on your machine
 
-Git documentation can be found at: `https://git-scm.com/`
+Git documentation can be found at: https://git-scm.com/
 
 Arcanist documentation can be found at:
-`https://secure.phabricator.com/book/phabricator/article/arcanist_quick_start/`
+https://secure.phabricator.com/book/phabricator/article/arcanist_quick_start/
 
-And: `https://secure.phabricator.com/book/phabricator/article/arcanist/`
+And: https://secure.phabricator.com/book/phabricator/article/arcanist/
 
 To install these packages on Debian or Ubuntu, type: `sudo apt-get install git arcanist`
 
@@ -122,12 +124,12 @@ Follow instructions provided by `arc install-certificate` to provide your API to
 6. Code formatting tools
 
 If code formatting tools do not install automatically on your system, you
-may have to install clang-format-4.0 and autopep8. clang-format-4.0.0 can be installed
-from http://releases.llvm.org/download.html
+may have to install clang-format-7, autopep8 and flake8. clang-format-7 can be
+installed from https://releases.llvm.org/download.html or https://apt.llvm.org
 
-To install autopep8 on Ubuntu:
+To install autopep8 and flake8 on Ubuntu:
 ```
-sudo apt-get install python-autopep8
+sudo apt-get install python-autopep8 flake8
 ```
 
 
@@ -177,15 +179,19 @@ committed a change to the Bitcoin ABC repository.
 - When reviewing a Diff, apply the changeset on your local by using
 `arc patch D{NNNN}`
 
+- You will likely be re-writing git histories multiple times, which causes
+timestamp changes that require re-building a significant number of files. It's
+highly recommended to install `ccache` (re-run ./configure if you install it
+later), as this will help cut your re-build times from several minutes to under
+a minute, in many cases.
 
 What to work on
 ---------------
 
 If you are looking for a useful task to contribute to the project, a good place
-to start is the list of tasks at `https://reviews.bitcoinabc.org/maniphest/`.
-You can also get in touch with some of the developers in the open BTCForks Slack
-channel at `https://btcforks.slack.com/`
+to start is the list of tasks at https://reviews.bitcoinabc.org/maniphest/
 
+You could also try [backporting](doc/backporting.md) some code from Bitcoin Core.
 
 Copyright
 ---------

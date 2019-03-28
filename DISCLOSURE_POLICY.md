@@ -10,19 +10,19 @@ Do not execute on or exploit any vulnerability.  This includes testnet, as both 
 ## Reporting a Bug or Vulnerability
 
 When reporting a bug or vulnerability, please provide the following to security@bitcoinabc.org:
-A short summary of the potential impact of the issue (if known).
-Details explaining how to reproduce the issue or how an exploit may be formed.
-Your name (optional).  If provided, we will provide credit for disclosure.  Otherwise, you will be treated anonymously and your privacy will be respected.
-Your email or other means of contacting you.
-A PGP key/fingerprint for us to provided encrypted responses to your disclosure.  If this is not provided, we cannot guarantee that you will receive a response prior to a fix being made and deployed.
+* A short summary of the potential impact of the issue (if known).
+* Details explaining how to reproduce the issue or how an exploit may be formed.
+* Your name (optional).  If provided, we will provide credit for disclosure.  Otherwise, you will be treated anonymously and your privacy will be respected.
+* Your email or other means of contacting you.
+* A PGP key/fingerprint for us to provide encrypted responses to your disclosure.  If this is not provided, we cannot guarantee that you will receive a response prior to a fix being made and deployed.
 
 ## Encrypting the Disclosure
 
-We highly encourage all disclosures to be encrypted to prevent interception and exploitation by third-parties prior to a fix being developed and deployed.  Please encrypt using this PGP public key with id: `3199472CFB54790D90B8ECB4B1606D6B42B7F4C7`
+We highly encourage all disclosures to be encrypted to prevent interception and exploitation by third-parties prior to a fix being developed and deployed.  Please encrypt using the PGP public key with fingerprint: `5442AB0B9178E0D1567479B471A3ED7ECF82C6A7`
 
 It may be obtained via:
 ```
-gpg --recv-keys 3199472CFB54790D90B8ECB4B1606D6B42B7F4C7
+gpg --recv-keys 5442AB0B9178E0D1567479B471A3ED7ECF82C6A7
 ```
 
 Below are some basic instructions for encrypting your disclosure on Linux if you are unfamiliar with GPG:
@@ -57,13 +57,6 @@ These PGP fingerprints and emails are provided only as backups in case you are u
 Bitcoin ABC Lead Developer
 deadalnix at gmail dot com
 629D7E5DDDA0512BD5860F2C5D7922BBD649C4A7
-```
-
-#### Shammah Chancellor
-```
-Bitcoin ABC Developer
-disclosure at shablag dot com
-7A55A44F3A3239827C8A594E7D3958C44427674A
 ```
 
 #### Jason B. Cox

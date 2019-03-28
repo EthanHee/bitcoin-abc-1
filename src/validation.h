@@ -66,8 +66,9 @@ static const Amount DEFAULT_UTXO_FEE = Amount::zero();
 static const Amount DEFAULT_TRANSACTION_MAXFEE(COIN / 10);
 //! Discourage users to set fees higher than this amount (in satoshis) per kB
 static const Amount HIGH_TX_FEE_PER_KB(COIN / 100);
-/** -maxtxfee will warn if called with a higher fee than this amount (in
- * satoshis */
+/**
+ * -maxtxfee will warn if called with a higher fee than this amount (in satoshis
+ */
 static const Amount HIGH_MAX_TX_FEE(100 * HIGH_TX_FEE_PER_KB);
 /** Default for -limitancestorcount, max number of in-mempool ancestors */
 static const unsigned int DEFAULT_ANCESTOR_LIMIT = 25;
@@ -93,7 +94,8 @@ static const unsigned int UNDOFILE_CHUNK_SIZE = 0x100000; // 1 MiB
 static const int MAX_SCRIPTCHECK_THREADS = 16;
 /** -par default (number of script-checking threads, 0 = auto) */
 static const int DEFAULT_SCRIPTCHECK_THREADS = 0;
-/** Number of blocks that can be requested at any given time from a single peer.
+/**
+ * Number of blocks that can be requested at any given time from a single peer.
  */
 static const int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16;
 /**
@@ -191,10 +193,19 @@ static const bool DEFAULT_PEERBLOOMFILTERS = true;
 
 /** Default for -stopatheight */
 static const int DEFAULT_STOPATHEIGHT = 0;
+/** Default for -maxreorgdepth */
+static const int DEFAULT_MAX_REORG_DEPTH = 10;
+/**
+ * Default for -finalizationdelay
+ * This is the minimum time between a block header reception and the block
+ * finalization.
+ * This value should be >> block propagation and validation time
+ */
+static const int64_t DEFAULT_MIN_FINALIZATION_DELAY = 2 * 60 * 60;
 
 extern CScript COINBASE_FLAGS;
 extern CCriticalSection cs_main;
-extern CTxMemPool mempool;
+extern CTxMemPool g_mempool;
 extern uint64_t nLastBlockTx;
 extern uint64_t nLastBlockSize;
 extern const std::string strMessageMagic;
@@ -202,7 +213,7 @@ extern CWaitableCriticalSection g_best_block_mutex;
 extern CConditionVariable g_best_block_cv;
 extern uint256 g_best_block;
 extern std::atomic_bool fImporting;
-extern bool fReindex;
+extern std::atomic_bool fReindex;
 extern int nScriptCheckThreads;
 extern bool fTxIndex;
 extern bool fIsBareMultisigStd;
@@ -251,6 +262,8 @@ extern uint64_t nPruneTarget;
 /** Block files containing a block-height within MIN_BLOCKS_TO_KEEP of
  * chainActive.Tip() will not be pruned. */
 static const unsigned int MIN_BLOCKS_TO_KEEP = 288;
+/** Minimum blocks required to signal NODE_NETWORK_LIMITED */
+static const unsigned int NODE_NETWORK_LIMITED_MIN_BLOCKS = 288;
 
 static const signed int DEFAULT_CHECKBLOCKS = 6;
 static const unsigned int DEFAULT_CHECKLEVEL = 3;
@@ -385,19 +398,6 @@ void ThreadScriptCheck();
 bool IsInitialBlockDownload();
 
 /**
- * Format a string that describes several potential problems detected by the
- * core.
- * strFor can have three values:
- * - "rpc": get critical warnings, which should put the client in safe mode if
- * non-empty
- * - "statusbar": get all warnings
- * - "gui": get all warnings, translated (where possible) for GUI
- * This function only returns the highest priority warning of the set selected
- * by strFor.
- */
-std::string GetWarnings(const std::string &strFor);
-
-/**
  * Retrieve a transaction (from memory pool, or from disk, if possible).
  */
 bool GetTransaction(const Config &config, const TxId &txid, CTransactionRef &tx,
@@ -524,7 +524,7 @@ private:
 
 public:
     CScriptCheck()
-        : amount(), ptxTo(0), nIn(0), nFlags(0), cacheStore(false),
+        : amount(), ptxTo(nullptr), nIn(0), nFlags(0), cacheStore(false),
           error(SCRIPT_ERR_UNKNOWN_ERROR), txdata() {}
 
     CScriptCheck(const CScript &scriptPubKeyIn, const Amount amountIn,
@@ -625,6 +625,13 @@ CBlockIndex *FindForkInGlobalIndex(const CChain &chain,
 bool PreciousBlock(const Config &config, CValidationState &state,
                    CBlockIndex *pindex);
 
+/**
+ * Mark a block as finalized.
+ * A finalized block can not be reorged in any way.
+ */
+bool FinalizeBlockAndInvalidate(const Config &config, CValidationState &state,
+                                CBlockIndex *pindex);
+
 /** Mark a block as invalid. */
 bool InvalidateBlock(const Config &config, CValidationState &state,
                      CBlockIndex *pindex);
@@ -637,7 +644,20 @@ bool ParkBlock(const Config &config, CValidationState &state,
 bool ResetBlockFailureFlags(CBlockIndex *pindex);
 
 /** Remove parked status from a block and its descendants. */
+bool UnparkBlockAndChildren(CBlockIndex *pindex);
+
+/** Remove parked status from a block. */
 bool UnparkBlock(CBlockIndex *pindex);
+
+/**
+ * Retrieve the topmost finalized block.
+ */
+const CBlockIndex *GetFinalizedBlock();
+
+/**
+ * Checks if a block is finalized.
+ */
+bool IsBlockFinalized(const CBlockIndex *pindex);
 
 /** The currently-connected chain of blocks (protected by cs_main). */
 extern CChain chainActive;
@@ -674,9 +694,9 @@ int32_t ComputeBlockVersion(const CBlockIndex *pindexPrev,
                             const Consensus::Params &params);
 
 /**
- * Reject codes greater or equal to this can be returned by AcceptToMemPool for
- * transactions, to signal internal conditions. They cannot and should not be
- * sent over the P2P network.
+ * Reject codes greater or equal to this can be returned by AcceptToMemPool or
+ * AcceptBlock for blocks/transactions, to signal internal conditions. They
+ * cannot and should not be sent over the P2P network.
  */
 static const unsigned int REJECT_INTERNAL = 0x100;
 /** Too high fee. Can not be triggered by P2P transactions */
@@ -685,6 +705,8 @@ static const unsigned int REJECT_HIGHFEE = 0x100;
 static const unsigned int REJECT_ALREADY_KNOWN = 0x101;
 /** Transaction conflicts with a transaction already known */
 static const unsigned int REJECT_CONFLICT = 0x102;
+/** Block conflicts with a transaction already known */
+static const unsigned int REJECT_AGAINST_FINALIZED = 0x103;
 
 /** Get block file info entry for one block file */
 CBlockFileInfo *GetBlockFileInfo(size_t n);

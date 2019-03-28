@@ -46,7 +46,7 @@ bool ContextualCheckTransaction(const Config &config, const CTransaction &tx,
                          "non-final transaction");
     }
 
-    if (IsMagneticAnomalyEnabled(config, nMedianTimePast)) {
+    if (IsMagneticAnomalyEnabled(config, nHeight)) {
         // Size limit
         if (::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION) <
             MIN_TX_SIZE) {
@@ -310,10 +310,10 @@ bool CheckTxInputs(const CTransaction &tx, CValidationState &state,
     }
 
     if (nValueIn < tx.GetValueOut()) {
-        return state.DoS(100, false, REJECT_INVALID, "bad-txns-in-belowout",
-                         false, strprintf("value in (%s) < value out (%s)",
-                                          FormatMoney(nValueIn),
-                                          FormatMoney(tx.GetValueOut())));
+        return state.DoS(
+            100, false, REJECT_INVALID, "bad-txns-in-belowout", false,
+            strprintf("value in (%s) < value out (%s)", FormatMoney(nValueIn),
+                      FormatMoney(tx.GetValueOut())));
     }
 
     // Tally transaction fees

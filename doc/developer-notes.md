@@ -17,6 +17,8 @@ to clean up the patch automatically before submitting a pull request.
   - No space after function names; one space after `if`, `for` and `while`.
   - Always add braces for block statements (e.g. `if`, `for`, `while`).
   - `++i` is preferred over `i++`.
+  - `static_assert` is preferred over `assert` where possible.
+    Generally; compile-time checking is preferred over run-time checking.
   - Use CamelCase for functions/methods, and lowerCamelCase for variables.
     - GLOBAL_CONSTANTS should use UPPER_SNAKE_CASE.
     - namespaces should use lower_snake_case.
@@ -494,6 +496,12 @@ GUI
   - *Rationale*: Model classes pass through events and data from the core, they
     should not interact with the user. That's where View classes come in. The converse also
     holds: try to not directly access core data structures from Views.
+
+Unit Tests
+-----------
+ - Test suite naming convention: The Boost test suite in file 
+   `src/test/foo_tests.cpp` should be named `foo_tests`. Test suite names must
+   be unique.
 
 Subtrees
 ----------

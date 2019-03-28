@@ -6,6 +6,7 @@
 #include "chain.h"
 #include "chainparams.h"
 #include "config.h"
+#include "core_io.h"
 #include "httpserver.h"
 #include "primitives/block.h"
 #include "primitives/transaction.h"
@@ -26,18 +27,21 @@
 // Allow a max of 15 outpoints to be queried at once.
 static const size_t MAX_GETUTXOS_OUTPOINTS = 15;
 
-enum RetFormat {
-    RF_UNDEF,
-    RF_BINARY,
-    RF_HEX,
-    RF_JSON,
+enum class RetFormat {
+    UNDEF,
+    BINARY,
+    HEX,
+    JSON,
 };
 
 static const struct {
     enum RetFormat rf;
     const char *name;
 } rf_names[] = {
-    {RF_UNDEF, ""}, {RF_BINARY, "bin"}, {RF_HEX, "hex"}, {RF_JSON, "json"},
+    {RetFormat::UNDEF, ""},
+    {RetFormat::BINARY, "bin"},
+    {RetFormat::HEX, "hex"},
+    {RetFormat::JSON, "json"},
 };
 
 struct CCoin {
@@ -45,7 +49,8 @@ struct CCoin {
     CTxOut out;
 
     CCoin() : nHeight(0) {}
-    CCoin(Coin in) : nHeight(in.GetHeight()), out(std::move(in.GetTxOut())) {}
+    explicit CCoin(Coin in)
+        : nHeight(in.GetHeight()), out(std::move(in.GetTxOut())) {}
 
     ADD_SERIALIZE_METHODS;
 
@@ -138,9 +143,9 @@ static bool rest_headers(Config &config, HTTPRequest *req,
     boost::split(path, param, boost::is_any_of("/"));
 
     if (path.size() != 2) {
-        return RESTERR(req, HTTP_BAD_REQUEST, "No header count specified. Use "
-                                              "/rest/headers/<count>/"
-                                              "<hash>.<ext>.");
+        return RESTERR(req, HTTP_BAD_REQUEST,
+                       "No header count specified. Use "
+                       "/rest/headers/<count>/<hash>.<ext>.");
     }
 
     long count = strtol(path[0].c_str(), nullptr, 10);
@@ -177,24 +182,27 @@ static bool rest_headers(Config &config, HTTPRequest *req,
     }
 
     switch (rf) {
-        case RF_BINARY: {
+        case RetFormat::BINARY: {
             std::string binaryHeader = ssHeader.str();
             req->WriteHeader("Content-Type", "application/octet-stream");
             req->WriteReply(HTTP_OK, binaryHeader);
             return true;
         }
 
-        case RF_HEX: {
+        case RetFormat::HEX: {
             std::string strHex =
                 HexStr(ssHeader.begin(), ssHeader.end()) + "\n";
             req->WriteHeader("Content-Type", "text/plain");
             req->WriteReply(HTTP_OK, strHex);
             return true;
         }
-        case RF_JSON: {
+        case RetFormat::JSON: {
             UniValue jsonHeaders(UniValue::VARR);
-            for (const CBlockIndex *pindex : headers) {
-                jsonHeaders.push_back(blockheaderToJSON(pindex));
+            {
+                LOCK(cs_main);
+                for (const CBlockIndex *pindex : headers) {
+                    jsonHeaders.push_back(blockheaderToJSON(pindex));
+                }
             }
             std::string strJSON = jsonHeaders.write() + "\n";
             req->WriteHeader("Content-Type", "application/json");
@@ -251,23 +259,27 @@ static bool rest_block(const Config &config, HTTPRequest *req,
     ssBlock << block;
 
     switch (rf) {
-        case RF_BINARY: {
+        case RetFormat::BINARY: {
             std::string binaryBlock = ssBlock.str();
             req->WriteHeader("Content-Type", "application/octet-stream");
             req->WriteReply(HTTP_OK, binaryBlock);
             return true;
         }
 
-        case RF_HEX: {
+        case RetFormat::HEX: {
             std::string strHex = HexStr(ssBlock.begin(), ssBlock.end()) + "\n";
             req->WriteHeader("Content-Type", "text/plain");
             req->WriteReply(HTTP_OK, strHex);
             return true;
         }
 
-        case RF_JSON: {
-            UniValue objBlock =
-                blockToJSON(config, block, pblockindex, showTxDetails);
+        case RetFormat::JSON: {
+            UniValue objBlock;
+            {
+                LOCK(cs_main);
+                objBlock =
+                    blockToJSON(config, block, pblockindex, showTxDetails);
+            }
             std::string strJSON = objBlock.write() + "\n";
             req->WriteHeader("Content-Type", "application/json");
             req->WriteReply(HTTP_OK, strJSON);
@@ -306,7 +318,7 @@ static bool rest_chaininfo(Config &config, HTTPRequest *req,
     const RetFormat rf = ParseDataFormat(param, strURIPart);
 
     switch (rf) {
-        case RF_JSON: {
+        case RetFormat::JSON: {
             JSONRPCRequest jsonRequest;
             jsonRequest.params = UniValue(UniValue::VARR);
             UniValue chainInfoObject = getblockchaininfo(config, jsonRequest);
@@ -336,7 +348,7 @@ static bool rest_mempool_info(Config &config, HTTPRequest *req,
     const RetFormat rf = ParseDataFormat(param, strURIPart);
 
     switch (rf) {
-        case RF_JSON: {
+        case RetFormat::JSON: {
             UniValue mempoolInfoObject = mempoolInfoToJSON();
 
             std::string strJSON = mempoolInfoObject.write() + "\n";
@@ -365,7 +377,7 @@ static bool rest_mempool_contents(Config &config, HTTPRequest *req,
     const RetFormat rf = ParseDataFormat(param, strURIPart);
 
     switch (rf) {
-        case RF_JSON: {
+        case RetFormat::JSON: {
             UniValue mempoolObject = mempoolToJSON(true);
 
             std::string strJSON = mempoolObject.write() + "\n";
@@ -410,23 +422,23 @@ static bool rest_tx(Config &config, HTTPRequest *req,
     ssTx << tx;
 
     switch (rf) {
-        case RF_BINARY: {
+        case RetFormat::BINARY: {
             std::string binaryTx = ssTx.str();
             req->WriteHeader("Content-Type", "application/octet-stream");
             req->WriteReply(HTTP_OK, binaryTx);
             return true;
         }
 
-        case RF_HEX: {
+        case RetFormat::HEX: {
             std::string strHex = HexStr(ssTx.begin(), ssTx.end()) + "\n";
             req->WriteHeader("Content-Type", "text/plain");
             req->WriteReply(HTTP_OK, strHex);
             return true;
         }
 
-        case RF_JSON: {
+        case RetFormat::JSON: {
             UniValue objTx(UniValue::VOBJ);
-            TxToJSON(config, *tx, hashBlock, objTx);
+            TxToUniv(*tx, hashBlock, objTx);
             std::string strJSON = objTx.write() + "\n";
             req->WriteHeader("Content-Type", "application/json");
             req->WriteReply(HTTP_OK, strJSON);
@@ -475,10 +487,9 @@ static bool rest_getutxos(Config &config, HTTPRequest *req,
     // gives binary output, ...
 
     if (uriParts.size() > 0) {
-
         // inputs is sent over URI scheme
         // (/rest/getutxos/checkmempool/txid1-n/txid2-n/...)
-        if (uriParts.size() > 0 && uriParts[0] == "checkmempool") {
+        if (uriParts[0] == "checkmempool") {
             fCheckMemPool = true;
         }
 
@@ -505,13 +516,13 @@ static bool rest_getutxos(Config &config, HTTPRequest *req,
     }
 
     switch (rf) {
-        case RF_HEX: {
+        case RetFormat::HEX: {
             // convert hex to bin, continue then with bin part
             std::vector<uint8_t> strRequestV = ParseHex(strRequestMutable);
             strRequestMutable.assign(strRequestV.begin(), strRequestV.end());
         }
         // FALLTHROUGH
-        case RF_BINARY: {
+        case RetFormat::BINARY: {
             try {
                 // deserialize only if user sent a request
                 if (strRequestMutable.size() > 0) {
@@ -534,7 +545,7 @@ static bool rest_getutxos(Config &config, HTTPRequest *req,
             break;
         }
 
-        case RF_JSON: {
+        case RetFormat::JSON: {
             if (!fInputParsed) {
                 return RESTERR(req, HTTP_BAD_REQUEST, "Error: empty request");
             }
@@ -563,13 +574,13 @@ static bool rest_getutxos(Config &config, HTTPRequest *req,
     std::vector<bool> hits;
     bitmap.resize((vOutPoints.size() + 7) / 8);
     {
-        LOCK2(cs_main, mempool.cs);
+        LOCK2(cs_main, g_mempool.cs);
 
         CCoinsView viewDummy;
         CCoinsViewCache view(&viewDummy);
 
         CCoinsViewCache &viewChain = *pcoinsTip;
-        CCoinsViewMemPool viewMempool(&viewChain, mempool);
+        CCoinsViewMemPool viewMempool(&viewChain, g_mempool);
 
         if (fCheckMemPool) {
             // switch cache backend to db+mempool in case user likes to query
@@ -581,7 +592,7 @@ static bool rest_getutxos(Config &config, HTTPRequest *req,
             Coin coin;
             bool hit = false;
             if (view.GetCoin(vOutPoints[i], coin) &&
-                !mempool.isSpent(vOutPoints[i])) {
+                !g_mempool.isSpent(vOutPoints[i])) {
                 hit = true;
                 outs.emplace_back(std::move(coin));
             }
@@ -595,7 +606,7 @@ static bool rest_getutxos(Config &config, HTTPRequest *req,
     }
 
     switch (rf) {
-        case RF_BINARY: {
+        case RetFormat::BINARY: {
             // serialize data
             // use exact same output as mentioned in Bip64
             CDataStream ssGetUTXOResponse(SER_NETWORK, PROTOCOL_VERSION);
@@ -609,7 +620,7 @@ static bool rest_getutxos(Config &config, HTTPRequest *req,
             return true;
         }
 
-        case RF_HEX: {
+        case RetFormat::HEX: {
             CDataStream ssGetUTXOResponse(SER_NETWORK, PROTOCOL_VERSION);
             ssGetUTXOResponse << chainActive.Height()
                               << chainActive.Tip()->GetBlockHash() << bitmap
@@ -623,17 +634,15 @@ static bool rest_getutxos(Config &config, HTTPRequest *req,
             return true;
         }
 
-        case RF_JSON: {
+        case RetFormat::JSON: {
             UniValue objGetUTXOResponse(UniValue::VOBJ);
 
             // pack in some essentials
             // use more or less the same output as mentioned in Bip64
-            objGetUTXOResponse.push_back(
-                Pair("chainHeight", chainActive.Height()));
-            objGetUTXOResponse.push_back(Pair(
-                "chaintipHash", chainActive.Tip()->GetBlockHash().GetHex()));
-            objGetUTXOResponse.push_back(
-                Pair("bitmap", bitmapStringRepresentation));
+            objGetUTXOResponse.pushKV("chainHeight", chainActive.Height());
+            objGetUTXOResponse.pushKV(
+                "chaintipHash", chainActive.Tip()->GetBlockHash().GetHex());
+            objGetUTXOResponse.pushKV("bitmap", bitmapStringRepresentation);
 
             UniValue utxos(UniValue::VARR);
             for (const CCoin &coin : outs) {
@@ -643,7 +652,7 @@ static bool rest_getutxos(Config &config, HTTPRequest *req,
 
                 // include the script in a json output
                 UniValue o(UniValue::VOBJ);
-                ScriptPubKeyToJSON(config, coin.out.scriptPubKey, o, true);
+                ScriptPubKeyToUniv(coin.out.scriptPubKey, o, true);
                 utxo.pushKV("scriptPubKey", o);
                 utxos.push_back(utxo);
             }

@@ -298,7 +298,7 @@ bool ReadKeyValue(CWallet *pwallet, CDataStream &ssKey, CDataStream &ssValue,
         } else if (strType == "tx") {
             TxId txid;
             ssKey >> txid;
-            CWalletTx wtx;
+            CWalletTx wtx(nullptr /* pwallet */, MakeTransactionRef());
             ssValue >> wtx;
             CValidationState state;
             bool isValid = wtx.IsCoinBase()
@@ -447,23 +447,21 @@ bool ReadKeyValue(CWallet *pwallet, CDataStream &ssKey, CDataStream &ssValue,
                 return false;
             }
             wss.fIsEncrypted = true;
-        } else if (strType == "keymeta" || strType == "watchmeta") {
-            CTxDestination keyID;
-            if (strType == "keymeta") {
-                CPubKey vchPubKey;
-                ssKey >> vchPubKey;
-                keyID = vchPubKey.GetID();
-            } else if (strType == "watchmeta") {
-                CScript script;
-                ssKey >> script;
-                keyID = CScriptID(script);
-            }
-
+        } else if (strType == "keymeta") {
+            CPubKey vchPubKey;
+            ssKey >> vchPubKey;
             CKeyMetadata keyMeta;
             ssValue >> keyMeta;
             wss.nKeyMeta++;
 
-            pwallet->LoadKeyMetadata(keyID, keyMeta);
+            pwallet->LoadKeyMetadata(vchPubKey.GetID(), keyMeta);
+        } else if (strType == "watchmeta") {
+            CScript script;
+            ssKey >> script;
+            CKeyMetadata keyMeta;
+            ssValue >> keyMeta;
+            wss.nKeyMeta++;
+            pwallet->LoadScriptMetadata(CScriptID(script), keyMeta);
         } else if (strType == "defaultkey") {
             // We don't want or need the default key, but if there is one set,
             // we want to make sure that it is valid so that we can detect
@@ -613,7 +611,7 @@ DBErrors CWalletDB::LoadWallet(CWallet *pwallet) {
     }
 
     for (const TxId &txid : wss.vWalletUpgrade) {
-        WriteTx(pwallet->mapWallet[txid]);
+        WriteTx(pwallet->mapWallet.at(txid));
     }
 
     // Rewrite encrypted wallets of versions 0.4.0 and 0.5.0rc:
@@ -634,8 +632,8 @@ DBErrors CWalletDB::LoadWallet(CWallet *pwallet) {
     pwallet->laccentries.clear();
     ListAccountCreditDebit("*", pwallet->laccentries);
     for (CAccountingEntry &entry : pwallet->laccentries) {
-        pwallet->wtxOrdered.insert(std::make_pair(
-            entry.nOrderPos, CWallet::TxPair((CWalletTx *)0, &entry)));
+        pwallet->wtxOrdered.insert(
+            std::make_pair(entry.nOrderPos, CWallet::TxPair(nullptr, &entry)));
     }
 
     return result;
@@ -681,7 +679,7 @@ DBErrors CWalletDB::FindWalletTx(std::vector<TxId> &txIds,
                 TxId txid;
                 ssKey >> txid;
 
-                CWalletTx wtx;
+                CWalletTx wtx(nullptr /* pwallet */, MakeTransactionRef());
                 ssValue >> wtx;
 
                 txIds.push_back(txid);
@@ -728,8 +726,9 @@ DBErrors CWalletDB::ZapSelectTx(std::vector<TxId> &txIdsIn,
 
         if ((*it) == txid) {
             if (!EraseTx(txid)) {
-                LogPrint(BCLog::DB, "Transaction was found for deletion but "
-                                    "returned database error: %s\n",
+                LogPrint(BCLog::DB,
+                         "Transaction was found for deletion but returned "
+                         "database error: %s\n",
                          txid.GetHex());
                 delerror = true;
             }
@@ -835,16 +834,16 @@ bool CWalletDB::RecoverKeysOnlyFilter(void *callbackData, CDataStream ssKey,
 }
 
 bool CWalletDB::VerifyEnvironment(const std::string &walletFile,
-                                  const fs::path &dataDir,
+                                  const fs::path &walletDir,
                                   std::string &errorStr) {
-    return CDB::VerifyEnvironment(walletFile, dataDir, errorStr);
+    return CDB::VerifyEnvironment(walletFile, walletDir, errorStr);
 }
 
 bool CWalletDB::VerifyDatabaseFile(const std::string &walletFile,
-                                   const fs::path &dataDir,
+                                   const fs::path &walletDir,
                                    std::string &warningStr,
                                    std::string &errorStr) {
-    return CDB::VerifyDatabaseFile(walletFile, dataDir, warningStr, errorStr,
+    return CDB::VerifyDatabaseFile(walletFile, walletDir, warningStr, errorStr,
                                    CWalletDB::Recover);
 }
 

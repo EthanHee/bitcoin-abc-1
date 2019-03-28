@@ -52,6 +52,10 @@ static const int TIMEOUT_INTERVAL = 20 * 60;
 static const int FEELER_INTERVAL = 120;
 /** The maximum number of entries in an 'inv' protocol message */
 static const unsigned int MAX_INV_SZ = 50000;
+static_assert(MAX_PROTOCOL_MESSAGE_LENGTH > MAX_INV_SZ * sizeof(CInv),
+              "Max protocol message length must be greater than largest "
+              "possible INV message");
+
 /** The maximum number of new addresses to accumulate before announcing. */
 static const unsigned int MAX_ADDR_TO_SEND = 1000;
 /** Maximum length of strSubVer in `version` message */
@@ -98,7 +102,7 @@ struct AddedNodeInfo {
     bool fInbound;
 };
 
-class CNodeStats;
+struct CNodeStats;
 class CClientUIInterface;
 
 struct CSerializedNetMsg {
@@ -184,14 +188,18 @@ public:
     template <typename Callable> void ForEachNode(Callable &&func) {
         LOCK(cs_vNodes);
         for (auto &&node : vNodes) {
-            if (NodeFullyConnected(node)) func(node);
+            if (NodeFullyConnected(node)) {
+                func(node);
+            }
         }
     };
 
     template <typename Callable> void ForEachNode(Callable &&func) const {
         LOCK(cs_vNodes);
         for (auto &&node : vNodes) {
-            if (NodeFullyConnected(node)) func(node);
+            if (NodeFullyConnected(node)) {
+                func(node);
+            }
         }
     };
 
@@ -199,7 +207,9 @@ public:
     void ForEachNodeThen(Callable &&pre, CallableAfter &&post) {
         LOCK(cs_vNodes);
         for (auto &&node : vNodes) {
-            if (NodeFullyConnected(node)) pre(node);
+            if (NodeFullyConnected(node)) {
+                pre(node);
+            }
         }
         post();
     };
@@ -208,7 +218,9 @@ public:
     void ForEachNodeThen(Callable &&pre, CallableAfter &&post) const {
         LOCK(cs_vNodes);
         for (auto &&node : vNodes) {
-            if (NodeFullyConnected(node)) pre(node);
+            if (NodeFullyConnected(node)) {
+                pre(node);
+            }
         }
         post();
     };
@@ -436,6 +448,7 @@ private:
 
     friend struct CConnmanTest;
 };
+
 extern std::unique_ptr<CConnman> g_connman;
 void Discover();
 void StartMapPort();
@@ -515,8 +528,12 @@ extern std::map<CNetAddr, LocalServiceInfo> mapLocalHost;
 // Command, total bytes
 typedef std::map<std::string, uint64_t> mapMsgCmdSize;
 
-class CNodeStats {
-public:
+/**
+ * POD that contains various stats about a node.
+ * Usually constructed from CConman::GetNodeStats. Stats are filled from the
+ * node using CNode::copyStats.
+ */
+struct CNodeStats {
     NodeId nodeid;
     ServiceFlags nServices;
     bool fRelayTxes;
@@ -650,6 +667,8 @@ public:
     bool fOneShot;
     bool m_manual_connection;
     bool fClient;
+    // after BIP159
+    bool m_limited_node;
     const bool fInbound;
     std::atomic_bool fSuccessfullyConnected;
     std::atomic_bool fDisconnect;

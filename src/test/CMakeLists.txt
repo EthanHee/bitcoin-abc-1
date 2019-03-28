@@ -44,10 +44,12 @@ create_test_suite(bitcoin)
 add_dependencies(check check-bitcoin)
 
 add_test_to_suite(bitcoin test_bitcoin
-	arith_uint256_tests.cpp
+	activation_tests.cpp
 	addrman_tests.cpp
-	amount_tests.cpp
 	allocator_tests.cpp
+	amount_tests.cpp
+	arith_uint256_tests.cpp
+	avalanche_tests.cpp
 	base32_tests.cpp
 	base58_tests.cpp
 	base64_tests.cpp
@@ -74,17 +76,19 @@ add_test_to_suite(bitcoin test_bitcoin
 	dstencode_tests.cpp
 	excessiveblock_tests.cpp
 	feerate_tests.cpp
+	finalization_tests.cpp
 	getarg_tests.cpp
 	hash_tests.cpp
 	inv_tests.cpp
 	jsonutil.cpp
 	key_tests.cpp
+	lcg_tests.cpp
 	limitedmap_tests.cpp
 	main_tests.cpp
 	mempool_tests.cpp
 	merkle_tests.cpp
 	miner_tests.cpp
-	monolith_opcodes.cpp
+	monolith_opcodes_tests.cpp
 	multisig_tests.cpp
 	net_tests.cpp
 	netbase_tests.cpp
@@ -92,19 +96,24 @@ add_test_to_suite(bitcoin test_bitcoin
 	policyestimator_tests.cpp
 	pow_tests.cpp
 	prevector_tests.cpp
+	radix_tests.cpp
 	raii_event_tests.cpp
 	random_tests.cpp
+	rcu_tests.cpp
 	reverselock_tests.cpp
 	rpc_tests.cpp
+	rpc_server_tests.cpp
 	rwcollection_tests.cpp
 	sanity_tests.cpp
 	scheduler_tests.cpp
+	schnorr_tests.cpp
 	script_commitment_tests.cpp
 	script_P2SH_tests.cpp
 	script_tests.cpp
 	scriptflags.cpp
 	scriptnum_tests.cpp
 	serialize_tests.cpp
+	sigcache_tests.cpp
 	sigencoding_tests.cpp
 	sighash_tests.cpp
 	sighashtype_tests.cpp
@@ -115,7 +124,6 @@ add_test_to_suite(bitcoin test_bitcoin
 	sync_tests.cpp
 	test_bitcoin.cpp
 	test_bitcoin_main.cpp
-	testutil.cpp
 	timedata_tests.cpp
 	transaction_tests.cpp
 	txvalidationcache_tests.cpp
@@ -163,6 +171,6 @@ if(BUILD_BITCOIN_WALLET)
 			../wallet/test/accounting_tests.cpp
 			../wallet/test/wallet_tests.cpp
 			../wallet/test/walletdb_tests.cpp
-			../wallet/test/crypto_tests.cpp
+			../wallet/test/wallet_crypto_tests.cpp
 	)
 endif()

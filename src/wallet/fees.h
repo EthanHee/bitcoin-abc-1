@@ -9,25 +9,25 @@
 
 #include "amount.h"
 
-class CBlockPolicyEstimator;
 class CCoinControl;
-class CFeeRate;
 class CTxMemPool;
-struct FeeCalculation;
 
 /**
  * Estimate the minimum fee considering user set parameters
  * and the required fee
  */
-Amount GetMinimumFee(unsigned int nTxBytes, unsigned int nConfirmTarget,
-                     const CTxMemPool &pool);
+Amount GetMinimumFee(unsigned int nTxBytes, const CTxMemPool &pool);
 
 /**
-* Estimate the minimum fee considering required fee and targetFee or if 0
-* then fee estimation for nConfirmTarget
-*/
+ * Estimate the minimum fee considering required fee and targetFee
+ */
+Amount GetMinimumFee(unsigned int nTxBytes, const CTxMemPool &pool,
+                     Amount targetFee);
 
-Amount GetMinimumFee(unsigned int nTxBytes, unsigned int nConfirmTarget,
-                     const CTxMemPool &pool, Amount targetFee);
+/**
+ * Estimate the minimum fee considering overriden fee rate from coin control
+ */
+Amount GetMinimumFee(unsigned int nTxBytes, const CTxMemPool &pool,
+                     const CCoinControl &coinControl);
 
 #endif // BITCOIN_WALLET_FEES_H

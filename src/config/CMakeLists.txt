@@ -1,4 +1,4 @@
-# Copyright (c) 2017-2018 The Bitcoin developers
+# Copyright (c) 2017-2019 The Bitcoin developers
 
 # This generates config.h which provides numerous defines
 # about the state of the plateform we are building on.
@@ -12,14 +12,14 @@ set(PACKAGE_NAME "Bitcoin ABC")
 
 # Version
 set(CLIENT_VERSION_MAJOR 0)
-set(CLIENT_VERSION_MINOR 18)
-set(CLIENT_VERSION_REVISION 3)
+set(CLIENT_VERSION_MINOR 19)
+set(CLIENT_VERSION_REVISION 2)
 set(CLIENT_VERSION_BUILD 0)
 
 option(CLIENT_VERSION_IS_RELEASE "Build a release version" OFF)
 
 # Copyright
-set(COPYRIGHT_YEAR 2018)
+set(COPYRIGHT_YEAR 2019)
 set(COPYRIGHT_HOLDERS "The %s developers")
 set(COPYRIGHT_HOLDERS_SUBSTITUTION Bitcoin)
 string(REPLACE "%s" ${COPYRIGHT_HOLDERS_SUBSTITUTION} COPYRIGHT_HOLDERS_FINAL ${COPYRIGHT_HOLDERS})
@@ -110,15 +110,11 @@ endfunction()
 check_builtin_exist(__builtin_clz HAVE_DECL___BUILTIN_CLZ)
 check_builtin_exist(__builtin_clzl HAVE_DECL___BUILTIN_CLZL)
 check_builtin_exist(__builtin_clzll HAVE_DECL___BUILTIN_CLZLL)
+check_builtin_exist(__builtin_popcount HAVE_DECL___BUILTIN_POPCOUNT)
 
 # Memory management capabilities
 check_symbol_exists(M_ARENA_MAX "malloc.h" HAVE_MALLOPT_ARENA_MAX)
 check_symbol_exists(malloc_info "malloc.h" HAVE_MALLOC_INFO)
-
-# Check for compiler features.
-if (cxx_thread_local IN_LIST CMAKE_CXX_COMPILE_FEATURES)
-	set(HAVE_THREAD_LOCAL 1)
-endif()
 
 # Various system libraries
 check_symbol_exists(strnlen "string.h" HAVE_DECL_STRNLEN)

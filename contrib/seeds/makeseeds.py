@@ -36,7 +36,7 @@ PATTERN_ONION = re.compile(
 # Used to only select nodes with a user agent string compatible with the
 # BCH/UAHF specification.
 PATTERN_AGENT = re.compile(
-    r"^(/Bitcoin ABC:0.(18).(\d+)\(.+\)/|/bitprim:\"0.(14).(\d+)\"/|/Bitcoin XT:0.11.(\d+)[K-Z]\(.+\)/|/BUCash:1.(5).(\d+)\(.+\)/|/bcash:v1.(\d+).(\d+)-(\S+)/)")
+    r"^(/Bitcoin ABC:0.(19).(\d+)\(.+\)/|/bcash:v1.(\d+).(\d+)-(\S+)/)")
 
 
 def parseline(line):
@@ -189,9 +189,9 @@ def main():
 
     for ip in ips:
         if ip['net'] == 'ipv6':
-            print('[%s]:%i' % (ip['ip'], ip['port']))
+            print('[{}]:{}'.format(ip['ip'], ip['port']))
         else:
-            print('%s:%i' % (ip['ip'], ip['port']))
+            print('{}:{}'.format(ip['ip'], ip['port']))
 
 
 if __name__ == '__main__':

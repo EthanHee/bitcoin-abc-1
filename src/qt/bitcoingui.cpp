@@ -25,6 +25,7 @@
 #ifdef ENABLE_WALLET
 #include "walletframe.h"
 #include "walletmodel.h"
+#include "walletview.h"
 #endif // ENABLE_WALLET
 
 #ifdef Q_OS_MAC
@@ -40,6 +41,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QComboBox>
 #include <QDateTime>
 #include <QDesktopWidget>
 #include <QDragEnterEvent>
@@ -67,12 +69,6 @@ const std::string BitcoinGUI::DEFAULT_UIPLATFORM =
     "other"
 #endif
     ;
-
-/**
- * Display name for default wallet name. Uses tilde to avoid name collisions in
- * the future with additional wallets
- */
-const QString BitcoinGUI::DEFAULT_WALLET = "~Default";
 
 BitcoinGUI::BitcoinGUI(const Config *configIn,
                        const PlatformStyle *_platformStyle,
@@ -489,6 +485,7 @@ void BitcoinGUI::createMenuBar() {
 void BitcoinGUI::createToolBars() {
     if (walletFrame) {
         QToolBar *toolbar = addToolBar(tr("Tabs toolbar"));
+        appToolBar = toolbar;
         toolbar->setContextMenuPolicy(Qt::PreventContextMenu);
         toolbar->setMovable(false);
         toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -497,6 +494,16 @@ void BitcoinGUI::createToolBars() {
         toolbar->addAction(receiveCoinsAction);
         toolbar->addAction(historyAction);
         overviewAction->setChecked(true);
+
+#ifdef ENABLE_WALLET
+        QWidget *spacer = new QWidget();
+        spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        toolbar->addWidget(spacer);
+
+        m_wallet_selector = new QComboBox();
+        connect(m_wallet_selector, SIGNAL(currentIndexChanged(const QString &)),
+                this, SLOT(setCurrentWallet(const QString &)));
+#endif
     }
 }
 
@@ -514,6 +521,9 @@ void BitcoinGUI::setClientModel(ClientModel *_clientModel) {
         connect(_clientModel, SIGNAL(networkActiveChanged(bool)), this,
                 SLOT(setNetworkActive(bool)));
 
+        modalOverlay->setKnownBestHeight(
+            _clientModel->getHeaderTipHeight(),
+            QDateTime::fromTime_t(_clientModel->getHeaderTipTime()));
         setNumBlocks(_clientModel->getNumBlocks(),
                      _clientModel->getLastBlockDate(),
                      _clientModel->getVerificationProgress(nullptr), false);
@@ -548,10 +558,6 @@ void BitcoinGUI::setClientModel(ClientModel *_clientModel) {
             // value in the model.
             setTrayIconVisible(optionsModel->getHideTrayIcon());
         }
-
-        modalOverlay->setKnownBestHeight(
-            clientModel->getHeaderTipHeight(),
-            QDateTime::fromTime_t(clientModel->getHeaderTipTime()));
     } else {
         // Disable possibility to show main window via action
         toggleHideAction->setEnabled(false);
@@ -571,10 +577,20 @@ void BitcoinGUI::setClientModel(ClientModel *_clientModel) {
 }
 
 #ifdef ENABLE_WALLET
-bool BitcoinGUI::addWallet(const QString &name, WalletModel *walletModel) {
+bool BitcoinGUI::addWallet(WalletModel *walletModel) {
     if (!walletFrame) return false;
+    const QString name = walletModel->getWalletName();
     setWalletActionsEnabled(true);
-    return walletFrame->addWallet(name, walletModel);
+    m_wallet_selector->addItem(name);
+    if (m_wallet_selector->count() == 2) {
+        m_wallet_selector_label = new QLabel();
+        m_wallet_selector_label->setText(tr("Wallet:") + " ");
+        m_wallet_selector_label->setBuddy(m_wallet_selector);
+        appToolBar->addWidget(m_wallet_selector_label);
+        appToolBar->addWidget(m_wallet_selector);
+    }
+    rpcConsole->addWallet(walletModel);
+    return walletFrame->addWallet(walletModel);
 }
 
 bool BitcoinGUI::setCurrentWallet(const QString &name) {
@@ -790,24 +806,28 @@ void BitcoinGUI::updateHeadersSyncProgressLabel() {
     int headersTipHeight = clientModel->getHeaderTipHeight();
     int estHeadersLeft = (GetTime() - headersTipTime) /
                          Params().GetConsensus().nPowTargetSpacing;
-    if (estHeadersLeft > HEADER_HEIGHT_DELTA_SYNC)
+    if (estHeadersLeft > HEADER_HEIGHT_DELTA_SYNC) {
         progressBarLabel->setText(
             tr("Syncing Headers (%1%)...")
                 .arg(QString::number(100.0 /
                                          (headersTipHeight + estHeadersLeft) *
                                          headersTipHeight,
                                      'f', 1)));
+    }
 }
 
 void BitcoinGUI::setNumBlocks(int count, const QDateTime &blockDate,
                               double nVerificationProgress, bool header) {
     if (modalOverlay) {
-        if (header)
+        if (header) {
             modalOverlay->setKnownBestHeight(count, blockDate);
-        else
+        } else {
             modalOverlay->tipUpdate(count, blockDate, nVerificationProgress);
+        }
     }
-    if (!clientModel) return;
+    if (!clientModel) {
+        return;
+    }
 
     // Prevent orphan statusbar messages (e.g. hover Quit in main menu, wait
     // until chain-sync starts -> garbled text)
@@ -816,7 +836,7 @@ void BitcoinGUI::setNumBlocks(int count, const QDateTime &blockDate,
     // Acquire current block source
     enum BlockSource blockSource = clientModel->getBlockSource();
     switch (blockSource) {
-        case BLOCK_SOURCE_NETWORK:
+        case BlockSource::NETWORK:
             if (header) {
                 updateHeadersSyncProgressLabel();
                 return;
@@ -824,17 +844,17 @@ void BitcoinGUI::setNumBlocks(int count, const QDateTime &blockDate,
             progressBarLabel->setText(tr("Synchronizing with network..."));
             updateHeadersSyncProgressLabel();
             break;
-        case BLOCK_SOURCE_DISK:
+        case BlockSource::DISK:
             if (header) {
                 progressBarLabel->setText(tr("Indexing blocks on disk..."));
             } else {
                 progressBarLabel->setText(tr("Processing blocks on disk..."));
             }
             break;
-        case BLOCK_SOURCE_REINDEX:
+        case BlockSource::REINDEX:
             progressBarLabel->setText(tr("Reindexing blocks on disk..."));
             break;
-        case BLOCK_SOURCE_NONE:
+        case BlockSource::NONE:
             if (header) {
                 return;
             }
@@ -936,7 +956,9 @@ void BitcoinGUI::message(const QString &title, const QString &message,
         }
     }
     // Append title to "Bitcoin - "
-    if (!msgType.isEmpty()) strTitle += " - " + msgType;
+    if (!msgType.isEmpty()) {
+        strTitle += " - " + msgType;
+    }
 
     // Check for error/warning icon
     if (style & CClientUIInterface::ICON_ERROR) {
@@ -959,7 +981,9 @@ void BitcoinGUI::message(const QString &title, const QString &message,
         QMessageBox mBox((QMessageBox::Icon)nMBoxIcon, strTitle, message,
                          buttons, this);
         int r = mBox.exec();
-        if (ret != nullptr) *ret = r == QMessageBox::Ok;
+        if (ret != nullptr) {
+            *ret = r == QMessageBox::Ok;
+        }
     } else
         notificator->notify((Notificator::Class)nNotifyIcon, strTitle, message);
 }
@@ -1011,16 +1035,21 @@ void BitcoinGUI::showEvent(QShowEvent *event) {
 void BitcoinGUI::incomingTransaction(const QString &date, int unit,
                                      const Amount amount, const QString &type,
                                      const QString &address,
-                                     const QString &label) {
+                                     const QString &label,
+                                     const QString &walletName) {
     // On new transaction, make an info balloon
     QString msg = tr("Date: %1\n").arg(date) +
                   tr("Amount: %1\n")
-                      .arg(BitcoinUnits::formatWithUnit(unit, amount, true)) +
-                  tr("Type: %1\n").arg(type);
-    if (!label.isEmpty())
+                      .arg(BitcoinUnits::formatWithUnit(unit, amount, true));
+    if (WalletModel::isMultiwallet() && !walletName.isEmpty()) {
+        msg += tr("Wallet: %1\n").arg(walletName);
+    }
+    msg += tr("Type: %1\n").arg(type);
+    if (!label.isEmpty()) {
         msg += tr("Label: %1\n").arg(label);
-    else if (!address.isEmpty())
+    } else if (!address.isEmpty()) {
         msg += tr("Address: %1\n").arg(address);
+    }
     message(amount < Amount::zero() ? tr("Sent transaction")
                                     : tr("Incoming transaction"),
             msg, CClientUIInterface::MSG_INFORMATION);
@@ -1029,7 +1058,9 @@ void BitcoinGUI::incomingTransaction(const QString &date, int unit,
 
 void BitcoinGUI::dragEnterEvent(QDragEnterEvent *event) {
     // Accept only URIs
-    if (event->mimeData()->hasUrls()) event->acceptProposedAction();
+    if (event->mimeData()->hasUrls()) {
+        event->acceptProposedAction();
+    }
 }
 
 void BitcoinGUI::dropEvent(QDropEvent *event) {
@@ -1046,8 +1077,9 @@ bool BitcoinGUI::eventFilter(QObject *object, QEvent *event) {
     if (event->type() == QEvent::StatusTip) {
         // Prevent adding text from setStatusTip(), if we currently use the
         // status bar for displaying other stuff
-        if (progressBarLabel->isVisible() || progressBar->isVisible())
+        if (progressBarLabel->isVisible() || progressBar->isVisible()) {
             return true;
+        }
     }
     return QMainWindow::eventFilter(object, event);
 }
@@ -1111,10 +1143,25 @@ void BitcoinGUI::setEncryptionStatus(int status) {
             break;
     }
 }
+
+void BitcoinGUI::updateWalletStatus() {
+    if (!walletFrame) {
+        return;
+    }
+    WalletView *const walletView = walletFrame->currentWalletView();
+    if (!walletView) {
+        return;
+    }
+    WalletModel *const walletModel = walletView->getWalletModel();
+    setEncryptionStatus(walletModel->getEncryptionStatus());
+    setHDStatus(walletModel->hdEnabled());
+}
 #endif // ENABLE_WALLET
 
 void BitcoinGUI::showNormalIfMinimized(bool fToggleHidden) {
-    if (!clientModel) return;
+    if (!clientModel) {
+        return;
+    }
 
     // activateWindow() (sometimes) helps with keyboard focus on Windows
     if (isHidden()) {
@@ -1126,8 +1173,9 @@ void BitcoinGUI::showNormalIfMinimized(bool fToggleHidden) {
     } else if (GUIUtil::isObscured(this)) {
         raise();
         activateWindow();
-    } else if (fToggleHidden)
+    } else if (fToggleHidden) {
         hide();
+    }
 }
 
 void BitcoinGUI::toggleHidden() {
@@ -1136,7 +1184,9 @@ void BitcoinGUI::toggleHidden() {
 
 void BitcoinGUI::detectShutdown() {
     if (ShutdownRequested()) {
-        if (rpcConsole) rpcConsole->hide();
+        if (rpcConsole) {
+            rpcConsole->hide();
+        }
         qApp->quit();
     }
 }
@@ -1149,13 +1199,14 @@ void BitcoinGUI::showProgress(const QString &title, int nProgress) {
         progressDialog->setCancelButton(0);
         progressDialog->setAutoClose(false);
         progressDialog->setValue(0);
-    } else if (nProgress == 100) {
-        if (progressDialog) {
+    } else if (progressDialog) {
+        if (nProgress == 100) {
             progressDialog->close();
             progressDialog->deleteLater();
+        } else {
+            progressDialog->setValue(nProgress);
         }
-    } else if (progressDialog)
-        progressDialog->setValue(nProgress);
+    }
 }
 
 void BitcoinGUI::setTrayIconVisible(bool fHideTrayIcon) {
@@ -1166,8 +1217,9 @@ void BitcoinGUI::setTrayIconVisible(bool fHideTrayIcon) {
 
 void BitcoinGUI::showModalOverlay() {
     if (modalOverlay &&
-        (progressBar->isVisible() || modalOverlay->isLayerVisible()))
+        (progressBar->isVisible() || modalOverlay->isLayerVisible())) {
         modalOverlay->toggleVisibility();
+    }
 }
 
 static bool ThreadSafeMessageBox(BitcoinGUI *gui, const std::string &message,

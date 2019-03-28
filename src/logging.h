@@ -21,6 +21,7 @@ static const bool DEFAULT_LOGIPS = false;
 static const bool DEFAULT_LOGTIMESTAMPS = true;
 
 extern bool fLogIPs;
+extern const char *const DEFAULT_DEBUGLOGFILE;
 
 namespace BCLog {
 
@@ -84,7 +85,8 @@ public:
     /** Send a string to the log output */
     int LogPrintStr(const std::string &str);
 
-    void OpenDebugLog();
+    fs::path GetDebugLogPath();
+    bool OpenDebugLog();
     void ShrinkDebugFile();
 
     void EnableCategory(LogFlags category);
@@ -113,6 +115,10 @@ std::string ListLogCategories();
 
 /** Return true if str parses as a log category and set the flag */
 bool GetLogCategory(BCLog::LogFlags &flag, const std::string &str);
+
+// Be conservative when using LogPrintf/error or other things which
+// unconditionally log to debug.log! It should not be the case that an inbound
+// peer can fill up a users disk with debug.log entries.
 
 #define LogPrint(category, ...)                                                \
     do {                                                                       \

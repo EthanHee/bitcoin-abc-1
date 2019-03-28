@@ -7,11 +7,10 @@
 # Test HighPriorityTransaction code
 #
 
-from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import *
-from test_framework.mininode import COIN
-from test_framework.cdefs import LEGACY_MAX_BLOCK_SIZE, COINBASE_MATURITY
 from test_framework.blocktools import create_confirmed_utxos
+from test_framework.messages import COIN
+from test_framework.test_framework import BitcoinTestFramework
+from test_framework.util import assert_equal, gen_return_txouts, satoshi_round
 
 
 class HighPriorityTransactionTest(BitcoinTestFramework):
@@ -30,8 +29,8 @@ class HighPriorityTransactionTest(BitcoinTestFramework):
             change = t['amount'] - fee
             outputs[addr] = satoshi_round(change)
             rawtx = node.createrawtransaction(inputs, outputs)
-            signresult = node.signrawtransaction(
-                rawtx, None, None, "NONE|FORKID")
+            signresult = node.signrawtransactionwithwallet(
+                rawtx, None, "NONE|FORKID")
             txid = node.sendrawtransaction(signresult["hex"], True)
             txids.append(txid)
         return txids

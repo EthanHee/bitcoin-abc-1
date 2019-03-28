@@ -13,14 +13,11 @@
 #include "wallet/coincontrol.h"
 #include "wallet/wallet.h"
 
-Amount GetMinimumFee(unsigned int nTxBytes, unsigned int nConfirmTarget,
-                     const CTxMemPool &pool, Amount targetFee) {
+Amount GetMinimumFee(unsigned int nTxBytes, const CTxMemPool &pool,
+                     Amount targetFee) {
     Amount nFeeNeeded = targetFee;
-    // User didn't set: use -txconfirmtarget to estimate...
     if (nFeeNeeded == Amount::zero()) {
-        int estimateFoundTarget = nConfirmTarget;
-        nFeeNeeded = pool.estimateSmartFee(nConfirmTarget, &estimateFoundTarget)
-                         .GetFeeCeiling(nTxBytes);
+        nFeeNeeded = pool.estimateFee().GetFeeCeiling(nTxBytes);
         // ... unless we don't have enough mempool data for estimatefee, then
         // use fallbackFee.
         if (nFeeNeeded == Amount::zero()) {
@@ -40,9 +37,17 @@ Amount GetMinimumFee(unsigned int nTxBytes, unsigned int nConfirmTarget,
     return nFeeNeeded;
 }
 
-Amount GetMinimumFee(unsigned int nTxBytes, unsigned int nConfirmTarget,
-                     const CTxMemPool &pool) {
+Amount GetMinimumFee(unsigned int nTxBytes, const CTxMemPool &pool) {
     // payTxFee is the user-set global for desired feerate.
-    return GetMinimumFee(nTxBytes, nConfirmTarget, pool,
-                         payTxFee.GetFeeCeiling(nTxBytes));
+    return GetMinimumFee(nTxBytes, pool, payTxFee.GetFeeCeiling(nTxBytes));
+}
+
+Amount GetMinimumFee(unsigned int nTxBytes, const CTxMemPool &pool,
+                     const CCoinControl &coinControl) {
+    if (coinControl.fOverrideFeeRate && coinControl.m_feerate) {
+        return GetMinimumFee(nTxBytes, pool,
+                             coinControl.m_feerate->GetFee(nTxBytes));
+    } else {
+        return GetMinimumFee(nTxBytes, pool);
+    }
 }

@@ -72,7 +72,7 @@ const char *ScriptErrorString(const ScriptError serror) {
         case SCRIPT_ERR_MINIMALDATA:
             return "Data push larger than necessary";
         case SCRIPT_ERR_SIG_PUSHONLY:
-            return "Only non-push operators allowed in signatures";
+            return "Only push operators allowed in signature scripts";
         case SCRIPT_ERR_SIG_HIGH_S:
             return "Non-canonical signature: S value is unnecessarily high";
         case SCRIPT_ERR_SIG_NULLDUMMY:
@@ -82,6 +82,8 @@ const char *ScriptErrorString(const ScriptError serror) {
         case SCRIPT_ERR_SIG_NULLFAIL:
             return "Signature must be zero for failed CHECK(MULTI)SIG "
                    "operation";
+        case SCRIPT_ERR_SIG_BADLENGTH:
+            return "Signature cannot be 65 bytes in CHECKMULTISIG";
         case SCRIPT_ERR_DISCOURAGE_UPGRADABLE_NOPS:
             return "NOPx reserved for soft-fork upgrades";
         case SCRIPT_ERR_PUBKEYTYPE:

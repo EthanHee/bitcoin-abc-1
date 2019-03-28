@@ -27,6 +27,7 @@
 #include "utilstrencodings.h"
 #include "validation.h"
 #include "validationinterface.h"
+#include "warnings.h"
 
 #include <univalue.h>
 
@@ -114,8 +115,8 @@ static UniValue getnetworkhashps(const Config &config,
 
     LOCK(cs_main);
     return GetNetworkHashPS(
-        request.params.size() > 0 ? request.params[0].get_int() : 120,
-        request.params.size() > 1 ? request.params[1].get_int() : -1);
+        !request.params[0].isNull() ? request.params[0].get_int() : 120,
+        !request.params[1].isNull() ? request.params[1].get_int() : -1);
 }
 
 UniValue generateBlocks(const Config &config,
@@ -138,8 +139,8 @@ UniValue generateBlocks(const Config &config,
     UniValue blockHashes(UniValue::VARR);
     while (nHeight < nHeightEnd) {
         std::unique_ptr<CBlockTemplate> pblocktemplate(
-            BlockAssembler(config).CreateNewBlock(
-                coinbaseScript->reserveScript));
+            BlockAssembler(config, g_mempool)
+                .CreateNewBlock(coinbaseScript->reserveScript));
 
         if (!pblocktemplate.get()) {
             throw JSONRPCError(RPC_INTERNAL_ERROR, "Couldn't create new block");
@@ -209,7 +210,7 @@ static UniValue generatetoaddress(const Config &config,
 
     int nGenerate = request.params[0].get_int();
     uint64_t nMaxTries = 1000000;
-    if (request.params.size() > 2) {
+    if (!request.params[2].isNull()) {
         nMaxTries = request.params[2].get_int();
     }
 
@@ -259,13 +260,12 @@ static UniValue getmininginfo(const Config &config,
     obj.pushKV("currentblocksize", uint64_t(nLastBlockSize));
     obj.pushKV("currentblocktx", uint64_t(nLastBlockTx));
     obj.pushKV("difficulty", double(GetDifficulty(chainActive.Tip())));
-    obj.push_back(
-        Pair("blockprioritypercentage",
-             uint8_t(gArgs.GetArg("-blockprioritypercentage",
-                                  DEFAULT_BLOCK_PRIORITY_PERCENTAGE))));
+    obj.pushKV("blockprioritypercentage",
+               uint8_t(gArgs.GetArg("-blockprioritypercentage",
+                                    DEFAULT_BLOCK_PRIORITY_PERCENTAGE)));
     obj.pushKV("errors", GetWarnings("statusbar"));
     obj.pushKV("networkhashps", getnetworkhashps(config, request));
-    obj.pushKV("pooledtx", uint64_t(mempool.size()));
+    obj.pushKV("pooledtx", uint64_t(g_mempool.size()));
     obj.pushKV("chain", config.GetChainParams().NetworkIDString());
     return obj;
 }
@@ -305,8 +305,8 @@ static UniValue prioritisetransaction(const Config &config,
     uint256 hash = ParseHashStr(request.params[0].get_str(), "txid");
     Amount nAmount = request.params[2].get_int64() * SATOSHI;
 
-    mempool.PrioritiseTransaction(hash, request.params[0].get_str(),
-                                  request.params[1].get_real(), nAmount);
+    g_mempool.PrioritiseTransaction(hash, request.params[0].get_str(),
+                                    request.params[1].get_real(), nAmount);
     return true;
 }
 
@@ -493,7 +493,7 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
     std::string strMode = "template";
     UniValue lpval = NullUniValue;
     std::set<std::string> setClientRules;
-    if (request.params.size() > 0) {
+    if (!request.params[0].isNull()) {
         const UniValue &oparam = request.params[0].get_obj();
         const UniValue &modeval = find_value(oparam, "mode");
         if (modeval.isStr()) {
@@ -614,7 +614,7 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
                 if (g_best_block_cv.wait_until(lock, checktxtime) ==
                     std::cv_status::timeout) {
                     // Timeout: Check transactions for update
-                    if (mempool.GetTransactionsUpdated() !=
+                    if (g_mempool.GetTransactionsUpdated() !=
                         nTransactionsUpdatedLastLP) {
                         break;
                     }
@@ -636,20 +636,21 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
     static int64_t nStart;
     static std::unique_ptr<CBlockTemplate> pblocktemplate;
     if (pindexPrev != chainActive.Tip() ||
-        (mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast &&
+        (g_mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast &&
          GetTime() - nStart > 5)) {
         // Clear pindexPrev so future calls make a new block, despite any
         // failures from here on
         pindexPrev = nullptr;
 
         // Store the pindexBest used before CreateNewBlock, to avoid races
-        nTransactionsUpdatedLast = mempool.GetTransactionsUpdated();
+        nTransactionsUpdatedLast = g_mempool.GetTransactionsUpdated();
         CBlockIndex *pindexPrevNew = chainActive.Tip();
         //nStart = GetTime();
 
         // Create new block
         CScript scriptDummy = CScript() << OP_TRUE;
-        pblocktemplate = BlockAssembler(config).CreateNewBlock(scriptDummy);
+        pblocktemplate =
+            BlockAssembler(config, g_mempool).CreateNewBlock(scriptDummy);
         if (!pblocktemplate) {
             throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
         }
@@ -748,18 +749,18 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
             entry.push_back(Pair("depends", deps));
 
             int index_in_template = i - 1;
-            entry.push_back(
-                Pair("fee", pblocktemplate->vTxFees[index_in_template] / SATOSHI));
-            int64_t nTxSigOps = pblocktemplate->vTxSigOpsCount[index_in_template];
-            entry.push_back(Pair("sigops", nTxSigOps));
+            entry.pushKV("fee",
+                        pblocktemplate->entries[index_in_template].fees / SATOSHI);
+            int64_t nTxSigOps =
+                pblocktemplate->entries[index_in_template].sigOpCount;
+            entry.pushKV("sigops", nTxSigOps);
 
             transactions.push_back(entry);
         }
     }
 
     UniValue aux(UniValue::VOBJ);
-    aux.push_back(
-        Pair("flags", HexStr(COINBASE_FLAGS.begin(), COINBASE_FLAGS.end())));
+    aux.pushKV("flags", HexStr(COINBASE_FLAGS.begin(), COINBASE_FLAGS.end()));
 
     arith_uint256 hashTarget = arith_uint256().SetCompact(pblock->nBits);
 
@@ -777,30 +778,28 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
 
     result.pushKV("version", pblock->nVersion);
 
-    result.push_back(Pair("previousblockhash", pblock->hashPrevBlock.GetHex()));
+    result.pushKV("previousblockhash", pblock->hashPrevBlock.GetHex());
     if(lightVersion)
     {
-        result.push_back(Pair("job_id", jobId.GetHex()));
-        result.push_back(Pair("merkle", merklebranch));
+        result.pushKV("job_id", jobId.GetHex());
+        result.pushKV("merkle", merklebranch);
     }
     else
     {
-        result.push_back(Pair("transactions", transactions));
+        result.pushKV("transactions", transactions);
     }
-    result.push_back(Pair("coinbaseaux", aux));
-    result.push_back(Pair("coinbasevalue",
-                          int64_t(pblock->vtx[0]->vout[0].nValue / SATOSHI)));
-    result.push_back(Pair("longpollid",
-                          chainActive.Tip()->GetBlockHash().GetHex() +
-                              i64tostr(nTransactionsUpdatedLast)));
+
+    result.pushKV("coinbaseaux", aux);
+    result.pushKV("coinbasevalue",
+                  int64_t(pblock->vtx[0]->vout[0].nValue / SATOSHI));
+    result.pushKV("longpollid", chainActive.Tip()->GetBlockHash().GetHex() +
+                                    i64tostr(nTransactionsUpdatedLast));
     result.pushKV("target", hashTarget.GetHex());
-    result.push_back(
-        Pair("mintime", int64_t(pindexPrev->GetMedianTimePast()) + 1));
+    result.pushKV("mintime", int64_t(pindexPrev->GetMedianTimePast()) + 1);
     result.pushKV("mutable", aMutable);
     result.pushKV("noncerange", "00000000ffffffff");
     // FIXME: Allow for mining block greater than 1M.
-    result.push_back(
-        Pair("sigoplimit", GetMaxBlockSigOpsCount(DEFAULT_MAX_BLOCK_SIZE)));
+    result.pushKV("sigoplimit", GetMaxBlockSigOpsCount(DEFAULT_MAX_BLOCK_SIZE));
     result.pushKV("sizelimit", DEFAULT_MAX_BLOCK_SIZE);
     result.pushKV("curtime", pblock->GetBlockTime());
     result.pushKV("bits", strprintf("%08x", pblock->nBits));
@@ -882,7 +881,7 @@ public:
     bool found;
     CValidationState state;
 
-    submitblock_StateCatcher(const uint256 &hashIn)
+    explicit submitblock_StateCatcher(const uint256 &hashIn)
         : hash(hashIn), found(false), state() {}
 
 protected:
@@ -1087,41 +1086,29 @@ static UniValue submitblocklight(const Config &config,
 
 static UniValue estimatefee(const Config &config,
                             const JSONRPCRequest &request) {
-    if (request.fHelp || request.params.size() != 1) {
+    if (request.fHelp || request.params.size() > 1) {
         throw std::runtime_error(
-            "estimatefee nblocks\n"
+            "estimatefee\n"
             "\nEstimates the approximate fee per kilobyte needed for a "
-            "transaction to begin\n"
-            "confirmation within nblocks blocks.\n"
-            "\nArguments:\n"
-            "1. nblocks     (numeric, required)\n"
+            "transaction\n"
             "\nResult:\n"
             "n              (numeric) estimated fee-per-kilobyte\n"
-            "\n"
-            "A negative value is returned if not enough transactions and "
-            "blocks\n"
-            "have been observed to make an estimate.\n"
-            "-1 is always returned for nblocks == 1 as it is impossible to "
-            "calculate\n"
-            "a fee that is high enough to get reliably included in the next "
-            "block.\n"
             "\nExample:\n" +
-            HelpExampleCli("estimatefee", "6"));
+            HelpExampleCli("estimatefee", ""));
     }
 
-    RPCTypeCheck(request.params, {UniValue::VNUM});
-
-    int nBlocks = request.params[0].get_int();
-    if (nBlocks < 1) {
-        nBlocks = 1;
+    if ((request.params.size() == 1) &&
+        !IsDeprecatedRPCEnabled(gArgs, "estimatefee")) {
+        // FIXME: Remove this message in 0.20
+        throw JSONRPCError(
+            RPC_METHOD_DEPRECATED,
+            "estimatefee with the nblocks argument is no longer supported\n"
+            "Please call estimatefee with no arguments instead.\n"
+            "\nExample:\n" +
+                HelpExampleCli("estimatefee", ""));
     }
 
-    CFeeRate feeRate = mempool.estimateFee(nBlocks);
-    if (feeRate == CFeeRate(Amount::zero())) {
-        return -1.0;
-    }
-
-    return ValueFromAmount(feeRate.GetFeePerK());
+    return ValueFromAmount(g_mempool.estimateFee().GetFeePerK());
 }
 
 // clang-format off

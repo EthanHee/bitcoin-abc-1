@@ -12,7 +12,6 @@
 #include "rpc/server.h"
 #include "rpcconsole.h"
 #include "test/test_bitcoin.h"
-#include "test/testutil.h"
 #include "univalue.h"
 #include "util.h"
 #include "validation.h"
@@ -47,8 +46,6 @@ void RPCNestedTests::rpcNestedTests() {
     // mempool.setSanityCheck(1.0);
 
     TestingSetup test;
-
-    SetRPCWarmupFinished();
 
     std::string result;
     std::string result2;
@@ -111,9 +108,9 @@ void RPCNestedTests::rpcNestedTests() {
     RPCConsole::RPCParseCommandLine(result, "signmessagewithprivkey abc,def",
                                     false, &filtered);
     QVERIFY(filtered == "signmessagewithprivkey(…)");
-    RPCConsole::RPCParseCommandLine(result, "signrawtransaction(abc)", false,
-                                    &filtered);
-    QVERIFY(filtered == "signrawtransaction(…)");
+    RPCConsole::RPCParseCommandLine(result, "signrawtransactionwithkey(abc)",
+                                    false, &filtered);
+    QVERIFY(filtered == "signrawtransactionwithkey(…)");
     RPCConsole::RPCParseCommandLine(result, "walletpassphrase(help())", false,
                                     &filtered);
     QVERIFY(filtered == "walletpassphrase(…)");
