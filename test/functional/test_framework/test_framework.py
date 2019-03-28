@@ -29,6 +29,7 @@ from .util import (
     initialize_datadir,
     log_filename,
     p2p_port,
+    rpc_port,
     set_node_times,
     sync_blocks,
     sync_mempools,
@@ -67,6 +68,7 @@ class BitcoinTestFramework():
         self.setup_clean_chain = False
         self.nodes = []
         self.mocktime = 0
+        self.supports_cli = False
 
     def main(self):
         """Main function. This should not be overridden by the subclass test scripts."""
@@ -77,7 +79,7 @@ class BitcoinTestFramework():
         parser.add_argument("--noshutdown", dest="noshutdown", default=False, action="store_true",
                             help="Don't stop bitcoinds after the test execution")
         parser.add_argument("--srcdir", dest="srcdir", default=os.path.normpath(os.path.dirname(os.path.realpath(__file__)) + "/../../../src"),
-                            help="Source directory containing bitcoind/bitcoin-cli (default: %default)")
+                            help="Source directory containing bitcoind/bitcoin-cli (default: %(default)s)")
         parser.add_argument("--cachedir", dest="cachedir", default=os.path.normpath(os.path.dirname(os.path.realpath(__file__)) + "/../../cache"),
                             help="Directory for caching pregenerated datadirs")
         parser.add_argument("--tmpdir", dest="tmpdir",
@@ -94,6 +96,8 @@ class BitcoinTestFramework():
                             help="Location of the test framework config file")
         parser.add_argument("--pdbonfailure", dest="pdbonfailure", default=False, action="store_true",
                             help="Attach a python debugger if test fails")
+        parser.add_argument("--usecli", dest="usecli", default=False, action="store_true",
+                            help="use bitcoin-cli instead of RPC for all commands")
         self.add_options(parser)
         self.options = parser.parse_args()
 
@@ -121,6 +125,9 @@ class BitcoinTestFramework():
         success = TestStatus.FAILED
 
         try:
+            if self.options.usecli and not self.supports_cli:
+                raise SkipTest(
+                    "--usecli specified but test does not support using CLI")
             self.setup_chain()
             self.setup_network()
             self.run_test()
@@ -210,7 +217,7 @@ class BitcoinTestFramework():
         # to split the network between nodes 1 and 2 to get
         # two halves that can work on competing chains.
         for i in range(self.num_nodes - 1):
-            connect_nodes_bi(self.nodes, i, i + 1)
+            connect_nodes_bi(self.nodes[i], self.nodes[i + 1])
         self.sync_all()
 
     def setup_nodes(self):
@@ -237,21 +244,21 @@ class BitcoinTestFramework():
         assert_equal(len(extra_args), num_nodes)
         assert_equal(len(binary), num_nodes)
         for i in range(num_nodes):
-            self.nodes.append(TestNode(i, self.options.tmpdir, extra_args[i], rpchost, timewait=timewait,
-                                       binary=binary[i], stderr=None, mocktime=self.mocktime, coverage_dir=self.options.coveragedir))
+            self.nodes.append(TestNode(i, self.options.tmpdir, extra_args[i], rpchost, rpc_port=rpc_port(i), p2p_port=p2p_port(i),
+                                       timewait=timewait, binary=binary[i], stderr=None, mocktime=self.mocktime, coverage_dir=self.options.coveragedir, use_cli=self.options.usecli))
 
-    def start_node(self, i, extra_args=None, stderr=None):
+    def start_node(self, i, *args, **kwargs):
         """Start a bitcoind"""
 
         node = self.nodes[i]
 
-        node.start(extra_args, stderr)
+        node.start(*args, **kwargs)
         node.wait_for_rpc_connection()
 
         if self.options.coveragedir is not None:
             coverage.write_all_rpc_commands(self.options.coveragedir, node.rpc)
 
-    def start_nodes(self, extra_args=None):
+    def start_nodes(self, extra_args=None, *args, **kwargs):
         """Start multiple bitcoinds"""
 
         if extra_args is None:
@@ -259,7 +266,7 @@ class BitcoinTestFramework():
         assert_equal(len(extra_args), self.num_nodes)
         try:
             for i, node in enumerate(self.nodes):
-                node.start(extra_args[i])
+                node.start(extra_args[i], *args, **kwargs)
             for node in self.nodes:
                 node.wait_for_rpc_connection()
         except:
@@ -292,10 +299,11 @@ class BitcoinTestFramework():
         self.stop_node(i)
         self.start_node(i, extra_args)
 
-    def assert_start_raises_init_error(self, i, extra_args=None, expected_msg=None):
+    def assert_start_raises_init_error(self, i, extra_args=None, expected_msg=None, *args, **kwargs):
         with tempfile.SpooledTemporaryFile(max_size=2**16) as log_stderr:
             try:
-                self.start_node(i, extra_args, stderr=log_stderr)
+                self.start_node(
+                    i, extra_args, stderr=log_stderr, *args, **kwargs)
                 self.stop_node(i)
             except Exception as e:
                 assert 'bitcoind exited' in str(e)  # node must have shutdown
@@ -321,15 +329,15 @@ class BitcoinTestFramework():
         """
         Split the network of four nodes into nodes 0/1 and 2/3.
         """
-        disconnect_nodes(self.nodes[1], 2)
-        disconnect_nodes(self.nodes[2], 1)
+        disconnect_nodes(self.nodes[1], self.nodes[2])
+        disconnect_nodes(self.nodes[2], self.nodes[1])
         self.sync_all([self.nodes[:2], self.nodes[2:]])
 
     def join_network(self):
         """
         Join the (previously split) network halves together.
         """
-        connect_nodes_bi(self.nodes, 1, 2)
+        connect_nodes_bi(self.nodes[1], self.nodes[2])
         self.sync_all()
 
     def sync_all(self, node_groups=None):
@@ -340,17 +348,17 @@ class BitcoinTestFramework():
             sync_blocks(group)
             sync_mempools(group)
 
-    def enable_mocktime(self, mocktime):
+    def enable_mocktime(self):
         """Enable mocktime for the script.
 
         mocktime may be needed for scripts that use the cached version of the
         blockchain.  If the cached version of the blockchain is used without
         mocktime then the mempools will not sync due to IBD.
-        """
-        if self.mocktime == 0:
-            self.mocktime = mocktime
-        else:
-            self.log.warning("mocktime overriden by test.")
+
+        For backwared compatibility of the python scripts with previous
+        versions of the cache, this helper function sets mocktime to Jan 1,
+        2014 + (201 * 10 * 60)"""
+        self.mocktime = 1388534400 + (201 * 10 * 60)
 
     def disable_mocktime(self):
         self.mocktime = 0
@@ -374,7 +382,7 @@ class BitcoinTestFramework():
         ch.setLevel(ll)
         # Format logs the same as bitcoind's debug.log with microprecision (so log files can be concatenated and sorted)
         formatter = logging.Formatter(
-            fmt='%(asctime)s.%(msecs)03d000 %(name)s (%(levelname)s): %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+            fmt='%(asctime)s.%(msecs)03d000Z %(name)s (%(levelname)s): %(message)s', datefmt='%Y-%m-%dT%H:%M:%S')
         formatter.converter = time.gmtime
         fh.setFormatter(formatter)
         ch.setFormatter(formatter)
@@ -418,8 +426,8 @@ class BitcoinTestFramework():
                         "-keypool=1", "-datadir=" + datadir, "-discover=0"]
                 if i > 0:
                     args.append("-connect=127.0.0.1:" + str(p2p_port(0)))
-                self.nodes.append(TestNode(i, self.options.cachedir, extra_args=[
-                ], rpchost=None, timewait=None, binary=None, stderr=None, mocktime=self.mocktime, coverage_dir=None))
+                self.nodes.append(TestNode(i, self.options.cachedir, extra_args=[], host=None, rpc_port=rpc_port(i), p2p_port=p2p_port(i),
+                                           timewait=None, binary=None, stderr=None, mocktime=self.mocktime, coverage_dir=None))
                 self.nodes[i].args = args
                 self.start_node(i)
 
@@ -434,13 +442,14 @@ class BitcoinTestFramework():
             #
             # blocks are created with timestamps 10 minutes apart
             # starting from 2010 minutes in the past
-            self.enable_mocktime(int(time.time()) - (201 * 10 * 60))
+            self.enable_mocktime()
+            block_time = self.mocktime - (201 * 10 * 60)
             for i in range(2):
                 for peer in range(4):
                     for j in range(25):
-                        set_node_times(self.nodes, self.mocktime)
+                        set_node_times(self.nodes, block_time)
                         self.nodes[peer].generate(1)
-                        self.mocktime += 10 * 60
+                        block_time += 10 * 60
                     # Must sync before next peer starts generating blocks
                     sync_blocks(self.nodes)
 
@@ -450,10 +459,9 @@ class BitcoinTestFramework():
             self.disable_mocktime()
             for i in range(MAX_NODES):
                 os.remove(log_filename(self.options.cachedir, i, "debug.log"))
-                os.remove(log_filename(self.options.cachedir, i, "db.log"))
-                os.remove(log_filename(self.options.cachedir, i, "peers.dat"))
                 os.remove(log_filename(
-                    self.options.cachedir, i, "fee_estimates.dat"))
+                    self.options.cachedir, i, "wallets/db.log"))
+                os.remove(log_filename(self.options.cachedir, i, "peers.dat"))
 
         for i in range(self.num_nodes):
             from_dir = os.path.join(self.options.cachedir, "node" + str(i))

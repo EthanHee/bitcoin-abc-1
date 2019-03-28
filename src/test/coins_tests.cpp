@@ -76,7 +76,7 @@ public:
 
 class CCoinsViewCacheTest : public CCoinsViewCache {
 public:
-    CCoinsViewCacheTest(CCoinsView *_base) : CCoinsViewCache(_base) {}
+    explicit CCoinsViewCacheTest(CCoinsView *_base) : CCoinsViewCache(_base) {}
 
     void SelfTest() const {
         // Manually recompute the dynamic usage of the whole data, and compare
@@ -92,8 +92,8 @@ public:
         BOOST_CHECK_EQUAL(DynamicMemoryUsage(), ret);
     }
 
-    CCoinsMap &map() { return cacheCoins; }
-    size_t &usage() { return cachedCoinsUsage; }
+    CCoinsMap &map() const { return cacheCoins; }
+    size_t &usage() const { return cachedCoinsUsage; }
 };
 } // namespace
 

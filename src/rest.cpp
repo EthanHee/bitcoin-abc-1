@@ -6,6 +6,7 @@
 #include "chain.h"
 #include "chainparams.h"
 #include "config.h"
+#include "core_io.h"
 #include "httpserver.h"
 #include "primitives/block.h"
 #include "primitives/transaction.h"
@@ -37,7 +38,10 @@ static const struct {
     enum RetFormat rf;
     const char *name;
 } rf_names[] = {
-    {RF_UNDEF, ""}, {RF_BINARY, "bin"}, {RF_HEX, "hex"}, {RF_JSON, "json"},
+    {RF_UNDEF, ""},
+    {RF_BINARY, "bin"},
+    {RF_HEX, "hex"},
+    {RF_JSON, "json"},
 };
 
 struct CCoin {
@@ -45,7 +49,8 @@ struct CCoin {
     CTxOut out;
 
     CCoin() : nHeight(0) {}
-    CCoin(Coin in) : nHeight(in.GetHeight()), out(std::move(in.GetTxOut())) {}
+    explicit CCoin(Coin in)
+        : nHeight(in.GetHeight()), out(std::move(in.GetTxOut())) {}
 
     ADD_SERIALIZE_METHODS;
 
@@ -138,9 +143,9 @@ static bool rest_headers(Config &config, HTTPRequest *req,
     boost::split(path, param, boost::is_any_of("/"));
 
     if (path.size() != 2) {
-        return RESTERR(req, HTTP_BAD_REQUEST, "No header count specified. Use "
-                                              "/rest/headers/<count>/"
-                                              "<hash>.<ext>.");
+        return RESTERR(req, HTTP_BAD_REQUEST,
+                       "No header count specified. Use "
+                       "/rest/headers/<count>/<hash>.<ext>.");
     }
 
     long count = strtol(path[0].c_str(), nullptr, 10);
@@ -426,7 +431,7 @@ static bool rest_tx(Config &config, HTTPRequest *req,
 
         case RF_JSON: {
             UniValue objTx(UniValue::VOBJ);
-            TxToJSON(config, *tx, hashBlock, objTx);
+            TxToUniv(*tx, hashBlock, objTx);
             std::string strJSON = objTx.write() + "\n";
             req->WriteHeader("Content-Type", "application/json");
             req->WriteReply(HTTP_OK, strJSON);
@@ -563,13 +568,13 @@ static bool rest_getutxos(Config &config, HTTPRequest *req,
     std::vector<bool> hits;
     bitmap.resize((vOutPoints.size() + 7) / 8);
     {
-        LOCK2(cs_main, mempool.cs);
+        LOCK2(cs_main, g_mempool.cs);
 
         CCoinsView viewDummy;
         CCoinsViewCache view(&viewDummy);
 
         CCoinsViewCache &viewChain = *pcoinsTip;
-        CCoinsViewMemPool viewMempool(&viewChain, mempool);
+        CCoinsViewMemPool viewMempool(&viewChain, g_mempool);
 
         if (fCheckMemPool) {
             // switch cache backend to db+mempool in case user likes to query
@@ -581,7 +586,7 @@ static bool rest_getutxos(Config &config, HTTPRequest *req,
             Coin coin;
             bool hit = false;
             if (view.GetCoin(vOutPoints[i], coin) &&
-                !mempool.isSpent(vOutPoints[i])) {
+                !g_mempool.isSpent(vOutPoints[i])) {
                 hit = true;
                 outs.emplace_back(std::move(coin));
             }
@@ -628,12 +633,10 @@ static bool rest_getutxos(Config &config, HTTPRequest *req,
 
             // pack in some essentials
             // use more or less the same output as mentioned in Bip64
-            objGetUTXOResponse.push_back(
-                Pair("chainHeight", chainActive.Height()));
-            objGetUTXOResponse.push_back(Pair(
-                "chaintipHash", chainActive.Tip()->GetBlockHash().GetHex()));
-            objGetUTXOResponse.push_back(
-                Pair("bitmap", bitmapStringRepresentation));
+            objGetUTXOResponse.pushKV("chainHeight", chainActive.Height());
+            objGetUTXOResponse.pushKV(
+                "chaintipHash", chainActive.Tip()->GetBlockHash().GetHex());
+            objGetUTXOResponse.pushKV("bitmap", bitmapStringRepresentation);
 
             UniValue utxos(UniValue::VARR);
             for (const CCoin &coin : outs) {
@@ -643,7 +646,7 @@ static bool rest_getutxos(Config &config, HTTPRequest *req,
 
                 // include the script in a json output
                 UniValue o(UniValue::VOBJ);
-                ScriptPubKeyToJSON(config, coin.out.scriptPubKey, o, true);
+                ScriptPubKeyToUniv(coin.out.scriptPubKey, o, true);
                 utxo.pushKV("scriptPubKey", o);
                 utxos.push_back(utxo);
             }

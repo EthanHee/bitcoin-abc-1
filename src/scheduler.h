@@ -45,9 +45,8 @@ public:
     typedef std::function<bool(void)> Predicate;
 
     // Call func at/after time t
-    void schedule(Function f,
-                  boost::chrono::system_clock::time_point t =
-                      boost::chrono::system_clock::now());
+    void schedule(Function f, boost::chrono::system_clock::time_point t =
+                                  boost::chrono::system_clock::now());
 
     // Convenience method: call f once deltaMilliSeconds from now
     void scheduleFromNow(Function f, int64_t deltaMilliSeconds);
@@ -84,7 +83,7 @@ private:
     int nThreadsServicingQueue;
     bool stopRequested;
     bool stopWhenEmpty;
-    bool shouldStop() {
+    bool shouldStop() const {
         return stopRequested || (stopWhenEmpty && taskQueue.empty());
     }
 };
@@ -107,7 +106,7 @@ private:
     void ProcessQueue();
 
 public:
-    SingleThreadedSchedulerClient(CScheduler *pschedulerIn)
+    explicit SingleThreadedSchedulerClient(CScheduler *pschedulerIn)
         : m_pscheduler(pschedulerIn) {}
     void AddToProcessQueue(std::function<void(void)> func);
 

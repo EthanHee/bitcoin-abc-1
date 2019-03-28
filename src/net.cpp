@@ -182,6 +182,12 @@ void AdvertiseLocal(CNode *pnode) {
     if (fListen && pnode->fSuccessfullyConnected) {
         CAddress addrLocal =
             GetLocalAddress(&pnode->addr, pnode->GetLocalServices());
+        if (gArgs.GetBoolArg("-addrmantest", false)) {
+            // use IPv4 loopback during addrmantest
+            addrLocal =
+                CAddress(CService(LookupNumeric("127.0.0.1", GetListenPort())),
+                         pnode->GetLocalServices());
+        }
         // If discovery is enabled, sometimes give our peer the address it tells
         // us that it sees us as in case it has a better idea of our address
         // than we do.
@@ -190,7 +196,7 @@ void AdvertiseLocal(CNode *pnode) {
              GetRand((GetnScore(addrLocal) > LOCAL_MANUAL) ? 8 : 2) == 0)) {
             addrLocal.SetIP(pnode->GetAddrLocal());
         }
-        if (addrLocal.IsRoutable()) {
+        if (addrLocal.IsRoutable() || gArgs.GetBoolArg("-addrmantest", false)) {
             LogPrint(BCLog::NET, "AdvertiseLocal: advertising address %s\n",
                      addrLocal.ToString());
             FastRandomContext insecure_rand;
@@ -1507,8 +1513,9 @@ void CConnman::ThreadSocketHandler() {
             int64_t nTime = GetSystemTimeInSeconds();
             if (nTime - pnode->nTimeConnected > 60) {
                 if (pnode->nLastRecv == 0 || pnode->nLastSend == 0) {
-                    LogPrint(BCLog::NET, "socket no message in first 60 "
-                                         "seconds, %d %d from %d\n",
+                    LogPrint(BCLog::NET,
+                             "socket no message in first 60 seconds, %d %d "
+                             "from %d\n",
                              pnode->nLastRecv != 0, pnode->nLastSend != 0,
                              pnode->GetId());
                     pnode->fDisconnect = true;
@@ -2302,7 +2309,8 @@ void Discover() {
                 continue;
             }
             if (ifa->ifa_addr->sa_family == AF_INET) {
-                struct sockaddr_in *s4 = (struct sockaddr_in *)(ifa->ifa_addr);
+                struct sockaddr_in *s4 =
+                    reinterpret_cast<struct sockaddr_in *>(ifa->ifa_addr);
                 CNetAddr addr(s4->sin_addr);
                 if (AddLocal(addr, LOCAL_IF)) {
                     LogPrintf("%s: IPv4 %s: %s\n", __func__, ifa->ifa_name,
@@ -2310,7 +2318,7 @@ void Discover() {
                 }
             } else if (ifa->ifa_addr->sa_family == AF_INET6) {
                 struct sockaddr_in6 *s6 =
-                    (struct sockaddr_in6 *)(ifa->ifa_addr);
+                    reinterpret_cast<struct sockaddr_in6 *>(ifa->ifa_addr);
                 CNetAddr addr(s6->sin6_addr);
                 if (AddLocal(addr, LOCAL_IF)) {
                     LogPrintf("%s: IPv6 %s: %s\n", __func__, ifa->ifa_name,
@@ -2459,12 +2467,12 @@ bool CConnman::Start(CScheduler &scheduler, const Options &connOptions) {
 
     if (semOutbound == nullptr) {
         // initialize semaphore
-        semOutbound = std::unique_ptr<CSemaphore>(new CSemaphore(
-            std::min((nMaxOutbound + nMaxFeeler), nMaxConnections)));
+        semOutbound = MakeUnique<CSemaphore>(
+            std::min((nMaxOutbound + nMaxFeeler), nMaxConnections));
     }
     if (semAddnode == nullptr) {
         // initialize semaphore
-        semAddnode = std::unique_ptr<CSemaphore>(new CSemaphore(nMaxAddnode));
+        semAddnode = MakeUnique<CSemaphore>(nMaxAddnode);
     }
 
     //
@@ -2870,6 +2878,8 @@ CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn,
     m_manual_connection = false;
     // set by version message
     fClient = false;
+    // set by version message
+    m_limited_node = false;
     fFeeler = false;
     fSuccessfullyConnected = false;
     fDisconnect = false;
@@ -2886,7 +2896,7 @@ CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn,
     nNextInvSend = 0;
     fRelayTxes = false;
     fSentAddr = false;
-    pfilter = std::unique_ptr<CBloomFilter>(new CBloomFilter());
+    pfilter = MakeUnique<CBloomFilter>();
     timeLastMempoolReq = 0;
     nLastBlockTime = 0;
     nLastTXTime = 0;
@@ -2941,8 +2951,7 @@ void CNode::AskFor(const CInv &inv) {
         nRequestTime = 0;
     }
     LogPrint(BCLog::NET, "askfor %s  %d (%s) peer=%d\n", inv.ToString(),
-             nRequestTime,
-             DateTimeStrFormat("%H:%M:%S", nRequestTime / 1000000), id);
+             nRequestTime, FormatISO8601DateTime(nRequestTime / 1000000), id);
 
     // Make sure not to reuse time indexes to keep things in the same order
     int64_t nNow = GetTimeMicros() - 1000000;
@@ -3072,28 +3081,15 @@ std::string userAgent(const Config &config) {
     std::vector<std::string> uacomments;
     uacomments.push_back("EB" + eb);
 
-    // sanitize comments per BIP-0014, format user agent and check total size
+    // Comments are checked for char compliance at startup, it is safe to add
+    // them to the user agent string
     for (const std::string &cmt : gArgs.GetArgs("-uacomment")) {
-        if (cmt != SanitizeString(cmt, SAFE_CHARS_UA_COMMENT)) {
-            LogPrintf(
-                "User Agent comment (%s) contains unsafe characters. "
-                "We are going to use a sanitize version of the comment.\n",
-                cmt);
-        }
         uacomments.push_back(cmt);
     }
 
+    // Size compliance is checked at startup, it is safe to not check it again
     std::string subversion =
         FormatSubVersion(CLIENT_NAME, CLIENT_VERSION, uacomments);
-    if (subversion.size() > MAX_SUBVERSION_LENGTH) {
-        LogPrintf("Total length of network version string (%i) exceeds maximum "
-                  "length (%i). Reduce the number or size of uacomments. "
-                  "String has been resized to the max length allowed.\n",
-                  subversion.size(), MAX_SUBVERSION_LENGTH);
-        subversion.resize(MAX_SUBVERSION_LENGTH - 2);
-        subversion.append(")/");
-        LogPrintf("Current network string has been set to: %s\n", subversion);
-    }
 
     return subversion;
 }

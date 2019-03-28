@@ -222,10 +222,10 @@ public:
         vch.clear();
         nReadPos = 0;
     }
-    iterator insert(iterator it, const char &x = char()) {
+    iterator insert(iterator it, const char x = char()) {
         return vch.insert(it, x);
     }
-    void insert(iterator it, size_type n, const char &x) {
+    void insert(iterator it, size_type n, const char x) {
         vch.insert(it, n, x);
     }
     value_type *data() { return vch.data() + nReadPos; }
@@ -310,7 +310,7 @@ public:
     //
     bool eof() const { return size() == 0; }
     CDataStream *rdbuf() { return this; }
-    int in_avail() { return size(); }
+    int in_avail() const { return size(); }
 
     void SetType(int n) { nType = n; }
     int GetType() const { return nType; }
@@ -324,17 +324,15 @@ public:
 
         // Read from the beginning of the buffer
         unsigned int nReadPosNext = nReadPos + nSize;
-        if (nReadPosNext >= vch.size()) {
-            if (nReadPosNext > vch.size()) {
-                throw std::ios_base::failure(
-                    "CDataStream::read(): end of data");
-            }
-            memcpy(pch, &vch[nReadPos], nSize);
+        if (nReadPosNext > vch.size()) {
+            throw std::ios_base::failure("CDataStream::read(): end of data");
+        }
+        memcpy(pch, &vch[nReadPos], nSize);
+        if (nReadPosNext == vch.size()) {
             nReadPos = 0;
             vch.clear();
             return;
         }
-        memcpy(pch, &vch[nReadPos], nSize);
         nReadPos = nReadPosNext;
     }
 
@@ -610,7 +608,7 @@ public:
     }
 
     // return the current reading position
-    uint64_t GetPos() { return nReadPos; }
+    uint64_t GetPos() const { return nReadPos; }
 
     // rewind to a given reading position
     bool SetPos(uint64_t nPos) {

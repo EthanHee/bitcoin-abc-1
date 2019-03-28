@@ -23,8 +23,7 @@ BOOST_FIXTURE_TEST_SUITE(dbwrapper_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(dbwrapper) {
     // Perform tests both obfuscated and non-obfuscated.
-    for (int i = 0; i < 2; i++) {
-        bool obfuscate = (bool)i;
+    for (bool obfuscate : {false, true}) {
         fs::path ph = fs::temp_directory_path() / fs::unique_path();
         CDBWrapper dbw(ph, (1 << 20), true, false, obfuscate);
         char key = 'k';
@@ -44,8 +43,7 @@ BOOST_AUTO_TEST_CASE(dbwrapper) {
 // Test batch operations
 BOOST_AUTO_TEST_CASE(dbwrapper_batch) {
     // Perform tests both obfuscated and non-obfuscated.
-    for (int i = 0; i < 2; i++) {
-        bool obfuscate = (bool)i;
+    for (bool obfuscate : {false, true}) {
         fs::path ph = fs::temp_directory_path() / fs::unique_path();
         CDBWrapper dbw(ph, (1 << 20), true, false, obfuscate);
 
@@ -80,8 +78,7 @@ BOOST_AUTO_TEST_CASE(dbwrapper_batch) {
 
 BOOST_AUTO_TEST_CASE(dbwrapper_iterator) {
     // Perform tests both obfuscated and non-obfuscated.
-    for (int i = 0; i < 2; i++) {
-        bool obfuscate = (bool)i;
+    for (bool obfuscate : {false, true}) {
         fs::path ph = fs::temp_directory_path() / fs::unique_path();
         CDBWrapper dbw(ph, (1 << 20), true, false, obfuscate);
 
@@ -126,7 +123,8 @@ BOOST_AUTO_TEST_CASE(existing_data_no_obfuscate) {
     create_directories(ph);
 
     // Set up a non-obfuscated wrapper to write some initial data.
-    CDBWrapper *dbw = new CDBWrapper(ph, (1 << 10), false, false, false);
+    std::unique_ptr<CDBWrapper> dbw =
+        MakeUnique<CDBWrapper>(ph, (1 << 10), false, false, false);
     char key = 'k';
     uint256 in = InsecureRand256();
     uint256 res;
@@ -136,7 +134,7 @@ BOOST_AUTO_TEST_CASE(existing_data_no_obfuscate) {
     BOOST_CHECK_EQUAL(res.ToString(), in.ToString());
 
     // Call the destructor to free leveldb LOCK
-    delete dbw;
+    dbw.reset();
 
     // Now, set up another wrapper that wants to obfuscate the same directory
     CDBWrapper odbw(ph, (1 << 10), false, false, true);
@@ -168,7 +166,8 @@ BOOST_AUTO_TEST_CASE(existing_data_reindex) {
     create_directories(ph);
 
     // Set up a non-obfuscated wrapper to write some initial data.
-    CDBWrapper *dbw = new CDBWrapper(ph, (1 << 10), false, false, false);
+    std::unique_ptr<CDBWrapper> dbw =
+        MakeUnique<CDBWrapper>(ph, (1 << 10), false, false, false);
     char key = 'k';
     uint256 in = InsecureRand256();
     uint256 res;
@@ -178,7 +177,7 @@ BOOST_AUTO_TEST_CASE(existing_data_reindex) {
     BOOST_CHECK_EQUAL(res.ToString(), in.ToString());
 
     // Call the destructor to free leveldb LOCK
-    delete dbw;
+    dbw.reset();
 
     // Simulate a -reindex by wiping the existing data store
     CDBWrapper odbw(ph, (1 << 10), false, true, true);
@@ -208,12 +207,7 @@ BOOST_AUTO_TEST_CASE(iterator_ordering) {
 
     std::unique_ptr<CDBIterator> it(
         const_cast<CDBWrapper &>(dbw).NewIterator());
-    for (int c = 0; c < 2; ++c) {
-        int seek_start;
-        if (c == 0)
-            seek_start = 0x00;
-        else
-            seek_start = 0x80;
+    for (int seek_start : {0x00, 0x80}) {
         it->Seek((uint8_t)seek_start);
         for (int x = seek_start; x < 256; ++x) {
             uint8_t key;
@@ -237,7 +231,7 @@ struct StringContentsSerializer {
     // different lengths. This is a terrible idea.
     std::string str;
     StringContentsSerializer() {}
-    StringContentsSerializer(const std::string &inp) : str(inp) {}
+    explicit StringContentsSerializer(const std::string &inp) : str(inp) {}
 
     StringContentsSerializer &operator+=(const std::string &s) {
         str += s;
@@ -287,12 +281,7 @@ BOOST_AUTO_TEST_CASE(iterator_string_ordering) {
 
     std::unique_ptr<CDBIterator> it(
         const_cast<CDBWrapper &>(dbw).NewIterator());
-    for (int c = 0; c < 2; ++c) {
-        int seek_start;
-        if (c == 0)
-            seek_start = 0;
-        else
-            seek_start = 5;
+    for (int seek_start : {0, 5}) {
         sprintf(buf, "%d", seek_start);
         StringContentsSerializer seek_key(buf);
         it->Seek(seek_key);

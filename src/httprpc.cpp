@@ -48,7 +48,7 @@ private:
 
 class HTTPRPCTimerInterface : public RPCTimerInterface {
 public:
-    HTTPRPCTimerInterface(struct event_base *_base) : base(_base) {}
+    explicit HTTPRPCTimerInterface(struct event_base *_base) : base(_base) {}
 
     const char *Name() override { return "HTTP"; }
 
@@ -62,7 +62,7 @@ private:
 };
 
 /* Stored RPC timer interface (for unregistration) */
-static HTTPRPCTimerInterface *httpRPCTimerInterface = 0;
+static std::unique_ptr<HTTPRPCTimerInterface> httpRPCTimerInterface;
 
 static void JSONErrorReply(HTTPRequest *req, const UniValue &objError,
                            const UniValue &id) {
@@ -393,8 +393,8 @@ bool StartHTTPRPC(Config &config,
     RegisterHTTPHandler("/wallet/", false, rpcFunction);
 #endif
     assert(EventBase());
-    httpRPCTimerInterface = new HTTPRPCTimerInterface(EventBase());
-    RPCSetTimerInterface(httpRPCTimerInterface);
+    httpRPCTimerInterface = MakeUnique<HTTPRPCTimerInterface>(EventBase());
+    RPCSetTimerInterface(httpRPCTimerInterface.get());
     return true;
 }
 
@@ -405,9 +405,11 @@ void InterruptHTTPRPC() {
 void StopHTTPRPC() {
     LogPrint(BCLog::RPC, "Stopping HTTP RPC server\n");
     UnregisterHTTPHandler("/", true);
+#ifdef ENABLE_WALLET
+    UnregisterHTTPHandler("/wallet/", false);
+#endif
     if (httpRPCTimerInterface) {
-        RPCUnsetTimerInterface(httpRPCTimerInterface);
-        delete httpRPCTimerInterface;
-        httpRPCTimerInterface = 0;
+        RPCUnsetTimerInterface(httpRPCTimerInterface.get());
+        httpRPCTimerInterface.reset();
     }
 }

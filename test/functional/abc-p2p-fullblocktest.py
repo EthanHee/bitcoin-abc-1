@@ -12,14 +12,14 @@ this one can be extended, to cover the checks done for bigger blocks
 """
 
 from test_framework.test_framework import ComparisonTestFramework
-from test_framework.util import assert_equal, assert_raises_rpc_error
+from test_framework.util import assert_equal
 from test_framework.comptool import TestManager, TestInstance, RejectResult
 from test_framework.blocktools import *
 import time
 from test_framework.key import CECKey
 from test_framework.script import *
-from test_framework.cdefs import (ONE_MEGABYTE, LEGACY_MAX_BLOCK_SIZE,
-                                  MAX_BLOCK_SIGOPS_PER_MB, MAX_TX_SIGOPS_COUNT)
+from test_framework.cdefs import (ONE_MEGABYTE, MAX_BLOCK_SIGOPS_PER_MB,
+                                  MAX_TX_SIGOPS_COUNT)
 from collections import deque
 
 REPLAY_PROTECTION_START_TIME = 2000000000
@@ -46,8 +46,9 @@ class FullBlockTest(ComparisonTestFramework):
         self.blocks = {}
         self.excessive_block_size = 100 * ONE_MEGABYTE
         self.extra_args = [['-whitelist=127.0.0.1',
-                            "-replayprotectionactivationtime=%d" % REPLAY_PROTECTION_START_TIME,
-                            "-excessiveblocksize=%d" % self.excessive_block_size]]
+                            "-replayprotectionactivationtime={}".format(
+                                REPLAY_PROTECTION_START_TIME),
+                            "-excessiveblocksize={}".format(self.excessive_block_size)]]
 
     def add_options(self, parser):
         super().add_options(parser)
@@ -57,8 +58,7 @@ class FullBlockTest(ComparisonTestFramework):
     def run_test(self):
         self.test = TestManager(self, self.options.tmpdir)
         self.test.add_all_connections(self.nodes)
-        # Start up network handling in another thread
-        NetworkThread().start()
+        network_thread_start()
         # Set the blocksize to 2MB as initial condition
         self.nodes[0].setexcessiveblock(self.excessive_block_size)
         self.test.run()
@@ -163,6 +163,7 @@ class FullBlockTest(ComparisonTestFramework):
 
             # Now that we added a bunch of transaction, we need to recompute
             # the merkle root.
+            make_conform_to_ctor(block)
             block.hashMerkleRoot = block.calc_merkle_root()
 
         # Check that the block size is what's expected
@@ -211,6 +212,7 @@ class FullBlockTest(ComparisonTestFramework):
             block = self.blocks[block_number]
             self.add_transactions_to_block(block, new_transactions)
             old_sha256 = block.sha256
+            make_conform_to_ctor(block)
             block.hashMerkleRoot = block.calc_merkle_root()
             block.solve()
             # Update the internal state just like in next_block

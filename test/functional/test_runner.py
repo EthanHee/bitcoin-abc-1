@@ -21,7 +21,6 @@ import datetime
 import os
 import time
 import shutil
-import signal
 import sys
 import subprocess
 import tempfile
@@ -74,9 +73,9 @@ TEST_PARAMS = {
     #    testName
     #    testName --param1 --param2
     #    testname --param3
-    "bip68-sequence.py": [["--magnetic-anomaly-time=1"]],
-    "txn_doublespend.py": [["--mineblock"]],
-    "txn_clone.py": [["--mineblock"]]
+    "wallet_txn_doublespend.py": [["--mineblock"]],
+    "wallet_txn_clone.py": [["--mineblock"]],
+    "wallet_multiwallet.py": [["--usecli"]],
 }
 
 # Used to limit the number of tests, when list of tests is not provided on command line
@@ -213,6 +212,13 @@ def main():
     # Build list of tests
     all_scripts = get_all_scripts_from_disk(tests_dir, NON_SCRIPTS)
 
+    # Check all tests with parameters actually exist
+    for test in TEST_PARAMS:
+        if not test in all_scripts:
+            print("ERROR: Test with parameter {} does not exist, check it has "
+                  "not been renamed or deleted".format(test))
+            sys.exit(1)
+
     if tests:
         # Individual tests have been specified. Run specified tests that exist
         # in the all_scripts list. Accept the name with or without .py
@@ -304,8 +310,12 @@ def run_tests(test_list, build_dir, tests_dir, junitouput, exeext, tmpdir, num_j
 
     if len(test_list) > 1 and num_jobs > 1:
         # Populate cache
-        subprocess.check_output(
-            [os.path.join(tests_dir, 'create_cache.py')] + flags + [os.path.join("--tmpdir=%s", "cache") % tmpdir])
+        try:
+            subprocess.check_output(
+                [os.path.join(tests_dir, 'create_cache.py')] + flags + [os.path.join("--tmpdir=%s", "cache") % tmpdir])
+        except Exception as e:
+            print(e.output)
+            raise e
 
     # Run Tests
     time0 = time.time()
@@ -331,7 +341,7 @@ def run_tests(test_list, build_dir, tests_dir, junitouput, exeext, tmpdir, num_j
         os.rmdir(tmpdir)
 
     all_passed = all(
-        map(lambda test_result: test_result.status == "Passed", test_results))
+        map(lambda test_result: test_result.was_successful, test_results))
 
     sys.exit(not all_passed)
 
@@ -470,7 +480,7 @@ def print_results(test_results, max_len_name, runtime):
     time_sum = 0
 
     for test_result in test_results:
-        all_passed = all_passed and test_result.status != "Failed"
+        all_passed = all_passed and test_result.was_successful
         time_sum += test_result.time
         test_result.padding = max_len_name
         results += str(test_result)
@@ -507,6 +517,10 @@ class TestResult():
             glyph = CIRCLE
 
         return color[1] + "%s | %s%s | %s s\n" % (self.name.ljust(self.padding), glyph, self.status.ljust(7), self.time) + color[0]
+
+    @property
+    def was_successful(self):
+        return self.status != "Failed"
 
 
 def get_all_scripts_from_disk(test_dir, non_scripts):

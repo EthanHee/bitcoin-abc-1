@@ -4,16 +4,55 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "wallet/init.h"
-
+#include "init.h"
 #include "config.h"
 #include "net.h"
 #include "util.h"
 #include "utilmoneystr.h"
 #include "validation.h"
+#include "wallet/rpcwallet.h"
 #include "wallet/wallet.h"
+#include "wallet/walletutil.h"
+#include "walletinitinterface.h"
 
-std::string GetWalletHelpString(bool showDebug) {
+class WalletInit : public WalletInitInterface {
+public:
+    //! Return the wallets help message.
+    std::string GetHelpString(bool showDebug) override;
+
+    //! Wallets parameter interaction
+    bool ParameterInteraction() override;
+
+    //! Register wallet RPCs.
+    void RegisterRPC(CRPCTable &tableRPC) override;
+
+    //! Responsible for reading and validating the -wallet arguments and
+    //! verifying the wallet database.
+    //  This function will perform salvage on the wallet if requested, as long
+    //  as only one wallet is being loaded (WalletParameterInteraction forbids
+    //  -salvagewallet, -zapwallettxes or -upgradewallet with multiwallet).
+    bool Verify(const CChainParams &chainParams) override;
+
+    //! Load wallet databases.
+    bool Open(const CChainParams &chainParams) override;
+
+    //! Complete startup of wallets.
+    void Start(CScheduler &scheduler) override;
+
+    //! Flush all wallets in preparation for shutdown.
+    void Flush() override;
+
+    //! Stop all wallets. Wallets will be flushed first.
+    void Stop() override;
+
+    //! Close all wallets.
+    void Close() override;
+};
+
+static WalletInit g_wallet_init;
+WalletInitInterface *const g_wallet_init_interface = &g_wallet_init;
+
+std::string WalletInit::GetHelpString(bool showDebug) {
     std::string strUsage = HelpMessageGroup(_("Wallet options:"));
     strUsage += HelpMessageOpt(
         "-disablewallet",
@@ -64,6 +103,10 @@ std::string GetWalletHelpString(bool showDebug) {
         "-walletbroadcast",
         _("Make the wallet broadcast transactions") + " " +
             strprintf(_("(default: %d)"), DEFAULT_WALLETBROADCAST));
+    strUsage += HelpMessageOpt(
+        "-walletdir=<dir>",
+        _("Specify directory to hold wallets (default: <datadir>/wallets if it "
+          "exists, otherwise <datadir>)"));
     strUsage += HelpMessageOpt("-walletnotify=<cmd>",
                                _("Execute command when a wallet transaction "
                                  "changes (%s in cmd is replaced by TxID)"));
@@ -71,8 +114,9 @@ std::string GetWalletHelpString(bool showDebug) {
         "-zapwallettxes=<mode>",
         _("Delete all wallet transactions and only recover those parts of the "
           "blockchain through -rescan on startup") +
-            " " + _("(1 = keep tx meta data e.g. account owner and payment "
-                    "request information, 2 = drop tx meta data)"));
+            " " +
+            _("(1 = keep tx meta data e.g. account owner and payment "
+              "request information, 2 = drop tx meta data)"));
 
     if (showDebug) {
         strUsage += HelpMessageGroup(_("Wallet debugging/testing options:"));
@@ -100,7 +144,7 @@ std::string GetWalletHelpString(bool showDebug) {
     return strUsage;
 }
 
-bool WalletParameterInteraction() {
+bool WalletInit::ParameterInteraction() {
     CFeeRate minRelayTxFee = GetConfig().GetMinFeePerKB();
 
     gArgs.SoftSetArg("-wallet", DEFAULT_WALLET_DAT);
@@ -249,10 +293,37 @@ bool WalletParameterInteraction() {
     return true;
 }
 
-bool WalletVerify(const CChainParams &chainParams) {
+void WalletInit::RegisterRPC(CRPCTable &t) {
+    if (gArgs.GetBoolArg("-disablewallet", false)) {
+        return;
+    }
+
+    RegisterWalletRPCCommands(t);
+}
+
+bool WalletInit::Verify(const CChainParams &chainParams) {
     if (gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
         return true;
     }
+
+    if (gArgs.IsArgSet("-walletdir")) {
+        fs::path wallet_dir = gArgs.GetArg("-walletdir", "");
+        if (!fs::exists(wallet_dir)) {
+            return InitError(
+                strprintf(_("Specified -walletdir \"%s\" does not exist"),
+                          wallet_dir.string()));
+        } else if (!fs::is_directory(wallet_dir)) {
+            return InitError(
+                strprintf(_("Specified -walletdir \"%s\" is not a directory"),
+                          wallet_dir.string()));
+        } else if (!wallet_dir.is_absolute()) {
+            return InitError(
+                strprintf(_("Specified -walletdir \"%s\" is a relative path"),
+                          wallet_dir.string()));
+        }
+    }
+
+    LogPrintf("Using wallet directory %s\n", GetWalletDir().string());
 
     uiInterface.InitMessage(_("Verifying wallet(s)..."));
 
@@ -273,7 +344,7 @@ bool WalletVerify(const CChainParams &chainParams) {
                                        walletFile));
         }
 
-        fs::path wallet_path = fs::absolute(walletFile, GetDataDir());
+        fs::path wallet_path = fs::absolute(walletFile, GetWalletDir());
 
         if (fs::exists(wallet_path) && (!fs::is_regular_file(wallet_path) ||
                                         fs::is_symlink(wallet_path))) {
@@ -289,7 +360,7 @@ bool WalletVerify(const CChainParams &chainParams) {
         }
 
         std::string strError;
-        if (!CWalletDB::VerifyEnvironment(walletFile, GetDataDir().string(),
+        if (!CWalletDB::VerifyEnvironment(walletFile, GetWalletDir().string(),
                                           strError)) {
             return InitError(strError);
         }
@@ -307,7 +378,7 @@ bool WalletVerify(const CChainParams &chainParams) {
 
         std::string strWarning;
         bool dbV = CWalletDB::VerifyDatabaseFile(
-            walletFile, GetDataDir().string(), strWarning, strError);
+            walletFile, GetWalletDir().string(), strWarning, strError);
         if (!strWarning.empty()) {
             InitWarning(strWarning);
         }
@@ -320,7 +391,7 @@ bool WalletVerify(const CChainParams &chainParams) {
     return true;
 }
 
-bool InitLoadWallet(const CChainParams &chainParams) {
+bool WalletInit::Open(const CChainParams &chainParams) {
     if (gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
         LogPrintf("Wallet disabled!\n");
         return true;
@@ -336,4 +407,29 @@ bool InitLoadWallet(const CChainParams &chainParams) {
     }
 
     return true;
+}
+
+void WalletInit::Start(CScheduler &scheduler) {
+    for (CWalletRef pwallet : vpwallets) {
+        pwallet->postInitProcess(scheduler);
+    }
+}
+
+void WalletInit::Flush() {
+    for (CWalletRef pwallet : vpwallets) {
+        pwallet->Flush(false);
+    }
+}
+
+void WalletInit::Stop() {
+    for (CWalletRef pwallet : vpwallets) {
+        pwallet->Flush(true);
+    }
+}
+
+void WalletInit::Close() {
+    for (CWalletRef pwallet : vpwallets) {
+        delete pwallet;
+    }
+    vpwallets.clear();
 }

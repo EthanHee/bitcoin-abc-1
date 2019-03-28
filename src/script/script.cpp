@@ -258,11 +258,11 @@ const char *GetOpName(opcodetype opcode) {
         case OP_INVALIDOPCODE:
             return "OP_INVALIDOPCODE";
 
-        // Note:
-        //  The template matching params OP_SMALLINTEGER/etc are defined in
-        //  opcodetype enum as kind of implementation hack, they are *NOT*
-        //  real opcodes. If found in real Script, just let the default:
-        //  case deal with them.
+            // Note:
+            //  The template matching params OP_SMALLINTEGER/etc are defined in
+            //  opcodetype enum as kind of implementation hack, they are *NOT*
+            //  real opcodes. If found in real Script, just let the default:
+            //  case deal with them.
 
         default:
             return "OP_UNKNOWN";
@@ -453,6 +453,13 @@ bool CScript::IsWitnessProgram(int &version,
         return true;
     }
     return false;
+}
+
+// Wrapper returning only the predicate
+bool CScript::IsWitnessProgram() const {
+    int version;
+    std::vector<uint8_t> program;
+    return IsWitnessProgram(version, program);
 }
 
 bool CScript::IsPushOnly(const_iterator pc) const {

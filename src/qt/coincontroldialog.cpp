@@ -529,10 +529,11 @@ void CoinControlDialog::updateLabels(WalletModel *model, QDialog *dialog) {
     if (nQuantity > 0) {
         // Bytes
         // always assume +1 output for change here
-        nBytes = nBytesInputs + ((CoinControlDialog::payAmounts.size() > 0
-                                      ? CoinControlDialog::payAmounts.size() + 1
-                                      : 2) *
-                                 34) +
+        nBytes = nBytesInputs +
+                 ((CoinControlDialog::payAmounts.size() > 0
+                       ? CoinControlDialog::payAmounts.size() + 1
+                       : 2) *
+                  34) +
                  10;
 
         // in the subtract fee from amount case, we can tell if zero change
@@ -545,11 +546,7 @@ void CoinControlDialog::updateLabels(WalletModel *model, QDialog *dialog) {
         }
 
         // Fee
-        nPayFee = GetMinimumFee(nBytes, nTxConfirmTarget, mempool);
-        if (nPayFee > Amount::zero() &&
-            coinControl->nMinimumTotalFee > nPayFee) {
-            nPayFee = coinControl->nMinimumTotalFee;
-        }
+        nPayFee = GetMinimumFee(nBytes, nTxConfirmTarget, g_mempool);
 
         if (nPayAmount > Amount::zero()) {
             nChange = nAmount - nPayAmount;
@@ -621,7 +618,7 @@ void CoinControlDialog::updateLabels(WalletModel *model, QDialog *dialog) {
     l7->setText(fDust ? tr("yes") : tr("no"));
     // Change
     l8->setText(BitcoinUnits::formatWithUnit(nDisplayUnit, nChange));
-    if (nPayFee > Amount::zero() && (coinControl->nMinimumTotalFee < nPayFee)) {
+    if (nPayFee > Amount::zero()) {
         l3->setText(ASYMP_UTF8 + l3->text());
         l4->setText(ASYMP_UTF8 + l4->text());
         if (nChange > Amount::zero() &&
@@ -639,7 +636,7 @@ void CoinControlDialog::updateLabels(WalletModel *model, QDialog *dialog) {
            "than the current dust threshold.");
 
     // how many satoshis the estimated fee can vary per byte we guess wrong
-    double dFeeVary = GetMinimumFee(1000, 2, mempool) / (1000 * SATOSHI);
+    double dFeeVary = GetMinimumFee(1000, 2, g_mempool) / (1000 * SATOSHI);
 
     QString toolTip4 =
         tr("Can vary +/- %1 satoshi(s) per input.").arg(dFeeVary);
@@ -747,10 +744,9 @@ void CoinControlDialog::updateView() {
             // label
             if (!(sAddress == sWalletAddress)) {
                 // change tooltip from where the change comes from
-                itemOutput->setToolTip(COLUMN_LABEL,
-                                       tr("change from %1 (%2)")
-                                           .arg(sWalletLabel)
-                                           .arg(sWalletAddress));
+                itemOutput->setToolTip(COLUMN_LABEL, tr("change from %1 (%2)")
+                                                         .arg(sWalletLabel)
+                                                         .arg(sWalletAddress));
                 itemOutput->setText(COLUMN_LABEL, tr("(change)"));
             } else if (!treeMode) {
                 QString sLabel =

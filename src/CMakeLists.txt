@@ -33,6 +33,7 @@ add_compiler_flag(
 	-Wformat-security
 	-Wcast-align
 	-Wunused-parameter
+	-Wmissing-braces
 	# FIXME: Activating this flag cause cmake to fail on leveldb.
 	# -Wthread-safety-analysis
 	-Wshadow
@@ -75,6 +76,7 @@ add_library(util
 	fs.cpp
 	logging.cpp
 	random.cpp
+	rcu.cpp
 	rpc/protocol.cpp
 	support/cleanse.cpp
 	support/lockedpool.cpp
@@ -181,6 +183,7 @@ target_link_libraries(bitcoinconsensus common)
 add_library(server
 	addrman.cpp
 	addrdb.cpp
+	avalanche.cpp
 	bloom.cpp
 	blockencodings.cpp
 	chain.cpp

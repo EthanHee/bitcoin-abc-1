@@ -7,11 +7,13 @@
 
 #include "chainparams.h" // for GetConsensus.
 #include "clientversion.h"
+#include "config.h"
 #include "consensus/consensus.h"
 #include "consensus/tx_verify.h"
 #include "consensus/validation.h"
 #include "policy/fees.h"
 #include "policy/policy.h"
+#include "reverse_iterator.h"
 #include "streams.h"
 #include "timedata.h"
 #include "util.h"
@@ -20,7 +22,7 @@
 #include "validation.h"
 #include "version.h"
 
-#include <boost/range/adaptor/reversed.hpp>
+#include <algorithm>
 
 CTxMemPoolEntry::CTxMemPoolEntry(const CTransactionRef &_tx, const Amount _nFee,
                                  int64_t _nTime, double _entryPriority,
@@ -51,10 +53,6 @@ CTxMemPoolEntry::CTxMemPoolEntry(const CTransactionRef &_tx, const Amount _nFee,
     nBillableSizeWithAncestors = GetTxBillableSize();
     nModFeesWithAncestors = nFee;
     nSigOpCountWithAncestors = sigOpCount;
-}
-
-CTxMemPoolEntry::CTxMemPoolEntry(const CTxMemPoolEntry &other) {
-    *this = other;
 }
 
 double CTxMemPoolEntry::GetPriority(unsigned int currentHeight) const {
@@ -156,7 +154,7 @@ void CTxMemPool::UpdateTransactionsFromBlock(
     // This maximizes the benefit of the descendant cache and guarantees that
     // setMemPoolChildren will be updated, an assumption made in
     // UpdateForDescendants.
-    for (const TxId &txid : boost::adaptors::reverse(txidsToUpdate)) {
+    for (const TxId &txid : reverse_iterate(txidsToUpdate)) {
         // we cache the in-mempool children to avoid duplicate updates
         setEntries setChildren;
         // calculate children from mapNextTx
@@ -412,13 +410,9 @@ CTxMemPool::CTxMemPool() : nTransactionsUpdated(0) {
     // transactions becomes O(N^2) where N is the number of transactions in the
     // pool
     nCheckFrequency = 0;
-
-    minerPolicyEstimator = new CBlockPolicyEstimator();
 }
 
-CTxMemPool::~CTxMemPool() {
-    delete minerPolicyEstimator;
-}
+CTxMemPool::~CTxMemPool() {}
 
 bool CTxMemPool::isSpent(const COutPoint &outpoint) {
     LOCK(cs);
@@ -485,7 +479,6 @@ bool CTxMemPool::addUnchecked(const uint256 &hash, const CTxMemPoolEntry &entry,
 
     nTransactionsUpdated++;
     totalTxSize += entry.GetTxSize();
-    minerPolicyEstimator->processTransaction(entry, validFeeEstimate);
 
     vTxHashes.emplace_back(tx.GetHash(), newit);
     newit->vTxHashesIdx = vTxHashes.size() - 1;
@@ -495,7 +488,6 @@ bool CTxMemPool::addUnchecked(const uint256 &hash, const CTxMemPoolEntry &entry,
 
 void CTxMemPool::removeUnchecked(txiter it, MemPoolRemovalReason reason) {
     NotifyEntryRemoved(it->GetSharedTx(), reason);
-    const uint256 txid = it->GetTx().GetId();
     for (const CTxIn &txin : it->GetTx().vin) {
         mapNextTx.erase(txin.prevout);
     }
@@ -518,7 +510,6 @@ void CTxMemPool::removeUnchecked(txiter it, MemPoolRemovalReason reason) {
     mapLinks.erase(it);
     mapTx.erase(it);
     nTransactionsUpdated++;
-    minerPolicyEstimator->removeTx(txid);
 }
 
 // Calculates descendants of entry that are not already in setDescendants, and
@@ -528,7 +519,7 @@ void CTxMemPool::removeUnchecked(txiter it, MemPoolRemovalReason reason) {
 // it are already in setDescendants as well, so that we can save time by not
 // iterating over those entries.
 void CTxMemPool::CalculateDescendants(txiter entryit,
-                                      setEntries &setDescendants) {
+                                      setEntries &setDescendants) const {
     setEntries stage;
     if (setDescendants.count(entryit) == 0) {
         stage.insert(entryit);
@@ -664,8 +655,8 @@ void CTxMemPool::removeForBlock(const std::vector<CTransactionRef> &vtx,
     disconnectpool.addForBlock(vtx);
 
     std::vector<const CTxMemPoolEntry *> entries;
-    for (const CTransactionRef &tx : boost::adaptors::reverse(
-             disconnectpool.GetQueuedTx().get<insertion_order>())) {
+    for (const CTransactionRef &tx :
+         reverse_iterate(disconnectpool.GetQueuedTx().get<insertion_order>())) {
         uint256 txid = tx->GetId();
 
         indexed_transaction_set::iterator i = mapTx.find(txid);
@@ -674,11 +665,8 @@ void CTxMemPool::removeForBlock(const std::vector<CTransactionRef> &vtx,
         }
     }
 
-    // Before the txs in the new block have been removed from the mempool,
-    // update policy estimates
-    minerPolicyEstimator->processBlock(nBlockHeight, entries);
-    for (const CTransactionRef &tx : boost::adaptors::reverse(
-             disconnectpool.GetQueuedTx().get<insertion_order>())) {
+    for (const CTransactionRef &tx :
+         reverse_iterate(disconnectpool.GetQueuedTx().get<insertion_order>())) {
         txiter it = mapTx.find(tx->GetId());
         if (it != mapTx.end()) {
             setEntries stage;
@@ -964,49 +952,14 @@ TxMempoolInfo CTxMemPool::info(const uint256 &txid) const {
 
 CFeeRate CTxMemPool::estimateFee(int nBlocks) const {
     LOCK(cs);
-    return minerPolicyEstimator->estimateFee(nBlocks);
-}
-CFeeRate CTxMemPool::estimateSmartFee(int nBlocks,
-                                      int *answerFoundAtBlocks) const {
-    LOCK(cs);
-    return minerPolicyEstimator->estimateSmartFee(nBlocks, answerFoundAtBlocks,
-                                                  *this);
-}
 
-bool CTxMemPool::WriteFeeEstimates(CAutoFile &fileout) const {
-    try {
-        LOCK(cs);
-        // version required to read: 0.13.99 or later
-        fileout << 139900;
-        // version that wrote the file
-        fileout << CLIENT_VERSION;
-        minerPolicyEstimator->Write(fileout);
-    } catch (const std::exception &) {
-        LogPrintf("CTxMemPool::WriteFeeEstimates(): unable to write policy "
-                  "estimator data (non-fatal)\n");
-        return false;
-    }
-    return true;
-}
-
-bool CTxMemPool::ReadFeeEstimates(CAutoFile &filein) {
-    try {
-        int nVersionRequired, nVersionThatWrote;
-        filein >> nVersionRequired >> nVersionThatWrote;
-        if (nVersionRequired > CLIENT_VERSION) {
-            return error("CTxMemPool::ReadFeeEstimates(): up-version (%d) fee "
-                         "estimate file",
-                         nVersionRequired);
-        }
-
-        LOCK(cs);
-        minerPolicyEstimator->Read(filein, nVersionThatWrote);
-    } catch (const std::exception &) {
-        LogPrintf("CTxMemPool::ReadFeeEstimates(): unable to read policy "
-                  "estimator data (non-fatal)\n");
-        return false;
-    }
-    return true;
+    uint64_t maxMempoolSize =
+        gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000;
+    // minerPolicy uses recent blocks to figure out a reasonable fee.  This
+    // may disagree with the rollingMinimumFeerate under certain scenarios
+    // where the mempool  increases rapidly, or blocks are being mined which
+    // do not contain propagated transactions.
+    return std::max(GetConfig().GetMinFeePerKB(), GetMinFee(maxMempoolSize));
 }
 
 void CTxMemPool::PrioritiseTransaction(const uint256 hash,
@@ -1302,7 +1255,7 @@ static const size_t MAX_DISCONNECTED_TX_POOL_SIZE = 20 * DEFAULT_MAX_BLOCK_SIZE;
 
 void DisconnectedBlockTransactions::addForBlock(
     const std::vector<CTransactionRef> &vtx) {
-    for (const auto &tx : vtx) {
+    for (const auto &tx : reverse_iterate(vtx)) {
         // If we already added it, just skip.
         auto it = queuedTx.find(tx->GetId());
         if (it != queuedTx.end()) {
@@ -1324,6 +1277,7 @@ void DisconnectedBlockTransactions::addForBlock(
         while (parents.size() > 0) {
             std::unordered_set<TxId, SaltedTxidHasher> worklist(
                 std::move(parents));
+            parents.clear();
 
             for (const TxId &txid : worklist) {
                 // If we do not have that txid in the set, nothing needs to be
@@ -1352,8 +1306,45 @@ void DisconnectedBlockTransactions::addForBlock(
         // Drop the earliest entry, and remove its children from the
         // mempool.
         auto it = queuedTx.get<insertion_order>().begin();
-        mempool.removeRecursive(**it, MemPoolRemovalReason::REORG);
+        g_mempool.removeRecursive(**it, MemPoolRemovalReason::REORG);
         removeEntry(it);
+    }
+}
+
+void DisconnectedBlockTransactions::importMempool(CTxMemPool &pool) {
+    // addForBlock's algorithm sorts a vector of transactions back into
+    // topological order. We use it in a separate object to create a valid
+    // ordering of all mempool transactions, which we then splice in front of
+    // the current queuedTx. This results in a valid sequence of transactions to
+    // be reprocessed in updateMempoolForReorg.
+
+    // We create vtx in order of the entry_time index to facilitate for
+    // addForBlocks (which iterates in reverse order), as vtx probably end in
+    // the correct ordering for queuedTx.
+    std::vector<CTransactionRef> vtx;
+    {
+        LOCK(pool.cs);
+        vtx.reserve(pool.mapTx.size());
+        for (const CTxMemPoolEntry &e : pool.mapTx.get<entry_time>()) {
+            vtx.push_back(e.GetSharedTx());
+        }
+        pool.clear();
+    }
+
+    // Use addForBlocks to sort the transactions and then splice them in front
+    // of queuedTx
+    DisconnectedBlockTransactions orderedTxnPool;
+    orderedTxnPool.addForBlock(vtx);
+    cachedInnerUsage += orderedTxnPool.cachedInnerUsage;
+    queuedTx.get<insertion_order>().splice(
+        queuedTx.get<insertion_order>().begin(),
+        orderedTxnPool.queuedTx.get<insertion_order>());
+
+    // We limit memory usage because we can't know if more blocks will be
+    // disconnected
+    while (DynamicMemoryUsage() > MAX_DISCONNECTED_TX_POOL_SIZE) {
+        // Drop the earliest entry which, by definition, has no children
+        removeEntry(queuedTx.get<insertion_order>().begin());
     }
 }
 
@@ -1369,16 +1360,16 @@ void DisconnectedBlockTransactions::updateMempoolForReorg(const Config &config,
     // the mempool starting with the earliest transaction that had been
     // previously seen in a block.
     for (const CTransactionRef &tx :
-         boost::adaptors::reverse(queuedTx.get<insertion_order>())) {
+         reverse_iterate(queuedTx.get<insertion_order>())) {
         // ignore validation errors in resurrected transactions
         CValidationState stateDummy;
         if (!fAddToMempool || tx->IsCoinBase() ||
-            !AcceptToMemoryPool(config, mempool, stateDummy, tx, false, nullptr,
-                                true)) {
+            !AcceptToMemoryPool(config, g_mempool, stateDummy, tx, false,
+                                nullptr, true)) {
             // If the transaction doesn't make it in to the mempool, remove any
             // transactions that depend on it (which would now be orphans).
-            mempool.removeRecursive(*tx, MemPoolRemovalReason::REORG);
-        } else if (mempool.exists(tx->GetId())) {
+            g_mempool.removeRecursive(*tx, MemPoolRemovalReason::REORG);
+        } else if (g_mempool.exists(tx->GetId())) {
             txidsUpdate.push_back(tx->GetId());
         }
     }
@@ -1390,15 +1381,15 @@ void DisconnectedBlockTransactions::updateMempoolForReorg(const Config &config,
     // previously-confirmed transactions back to the mempool.
     // UpdateTransactionsFromBlock finds descendants of any transactions in the
     // disconnectpool that were added back and cleans up the mempool state.
-    mempool.UpdateTransactionsFromBlock(txidsUpdate);
+    g_mempool.UpdateTransactionsFromBlock(txidsUpdate);
 
     // We also need to remove any now-immature transactions
-    mempool.removeForReorg(config, pcoinsTip.get(),
-                           chainActive.Tip()->nHeight + 1,
-                           STANDARD_LOCKTIME_VERIFY_FLAGS);
+    g_mempool.removeForReorg(config, pcoinsTip.get(),
+                             chainActive.Tip()->nHeight + 1,
+                             STANDARD_LOCKTIME_VERIFY_FLAGS);
 
     // Re-limit mempool size, in case we added any transactions
-    mempool.LimitSize(
+    g_mempool.LimitSize(
         gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000,
         gArgs.GetArg("-mempoolexpiry", DEFAULT_MEMPOOL_EXPIRY) * 60 * 60);
 }

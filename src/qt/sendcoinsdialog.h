@@ -60,6 +60,9 @@ public Q_SLOTS:
                     const Amount watchUnconfBalance,
                     const Amount watchImmatureBalance);
 
+Q_SIGNALS:
+    void coinsSent(const uint256 &txid);
+
 private:
     Ui::SendCoinsDialog *ui;
     ClientModel *clientModel;
@@ -108,12 +111,15 @@ Q_SIGNALS:
                  unsigned int style);
 };
 
+#define SEND_CONFIRM_DELAY 3
+
 class SendConfirmationDialog : public QMessageBox {
     Q_OBJECT
 
 public:
     SendConfirmationDialog(const QString &title, const QString &text,
-                           int secDelay = 0, QWidget *parent = 0);
+                           int secDelay = SEND_CONFIRM_DELAY,
+                           QWidget *parent = 0);
     int exec();
 
 private Q_SLOTS:

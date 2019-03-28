@@ -4,17 +4,15 @@
 
 #include "sync.h"
 
-#include "util.h"
+#include "logging.h"
 #include "utilstrencodings.h"
 
 #include <cstdio>
+#include <map>
+#include <memory>
 #include <set>
 
 #ifdef DEBUG_LOCKCONTENTION
-#if !defined(HAVE_THREAD_LOCAL)
-static_assert(false, "thread_local is not supported");
-#endif
-
 void PrintLockContention(const char *pszName, const char *pszFile, int nLine) {
     LogPrintf("LOCKCONTENTION: %s\n", pszName);
     LogPrintf("Locker: %s:%d\n", pszFile, nLine);
@@ -100,8 +98,9 @@ potential_deadlock_detected(const std::pair<void *, void *> &mismatch,
         LogPrintf(" %s\n", i.second.ToString());
     }
     if (g_debug_lockorder_abort) {
-        fprintf(stderr, "Assertion failed: detected inconsistent lock order at "
-                        "%s:%i, details in debug log.\n",
+        fprintf(stderr,
+                "Assertion failed: detected inconsistent lock order at %s:%i, "
+                "details in debug log.\n",
                 __FILE__, __LINE__);
         abort();
     }

@@ -82,7 +82,7 @@ private:
     class ThreadCounter {
     public:
         WorkQueue &wq;
-        ThreadCounter(WorkQueue &w) : wq(w) {
+        explicit ThreadCounter(WorkQueue &w) : wq(w) {
             std::lock_guard<std::mutex> lock(wq.cs);
             wq.numThreads += 1;
         }
@@ -94,7 +94,7 @@ private:
     };
 
 public:
-    WorkQueue(size_t _maxDepth)
+    explicit WorkQueue(size_t _maxDepth)
         : running(true), maxDepth(_maxDepth), numThreads(0) {}
     /** Precondition: worker threads have all stopped (call WaitExit) */
     ~WorkQueue() {}
@@ -155,13 +155,13 @@ struct HTTPPathHandler {
 /** HTTP module state */
 
 //! libevent event loop
-static struct event_base *eventBase = 0;
+static struct event_base *eventBase = nullptr;
 //! HTTP server
-struct evhttp *eventHTTP = 0;
+struct evhttp *eventHTTP = nullptr;
 //! List of subnets to allow RPC connections from
 static std::vector<CSubNet> rpc_allow_subnets;
 //! Work queue for handling longer requests off the event loop thread
-static WorkQueue<HTTPClosure> *workQueue = 0;
+static WorkQueue<HTTPClosure> *workQueue = nullptr;
 //! Handlers for (sub)paths
 std::vector<HTTPPathHandler> pathHandlers;
 //! Bound listening sockets
@@ -417,16 +417,15 @@ bool InitHTTPServer(Config &config) {
     evhttp_set_timeout(
         http, gArgs.GetArg("-rpcservertimeout", DEFAULT_HTTP_SERVER_TIMEOUT));
     evhttp_set_max_headers_size(http, MAX_HEADERS_SIZE);
-    evhttp_set_max_body_size(
-        http, MIN_SUPPORTED_BODY_SIZE + 2 * config.GetMaxBlockSize());
+    evhttp_set_max_body_size(http, MIN_SUPPORTED_BODY_SIZE +
+                                       2 * config.GetMaxBlockSize());
     evhttp_set_gencb(http, http_request_cb, &config);
 
     // Only POST and OPTIONS are supported, but we return HTTP 405 for the
     // others
-    evhttp_set_allowed_methods(http,
-                               EVHTTP_REQ_GET | EVHTTP_REQ_POST |
-                                   EVHTTP_REQ_HEAD | EVHTTP_REQ_PUT |
-                                   EVHTTP_REQ_DELETE | EVHTTP_REQ_OPTIONS);
+    evhttp_set_allowed_methods(
+        http, EVHTTP_REQ_GET | EVHTTP_REQ_POST | EVHTTP_REQ_HEAD |
+                  EVHTTP_REQ_PUT | EVHTTP_REQ_DELETE | EVHTTP_REQ_OPTIONS);
 
     if (!HTTPBindAddresses(http)) {
         LogPrintf("Unable to bind any endpoint for RPC server\n");
@@ -505,11 +504,11 @@ void StopHTTPServer() {
     }
     if (eventHTTP) {
         evhttp_free(eventHTTP);
-        eventHTTP = 0;
+        eventHTTP = nullptr;
     }
     if (eventBase) {
         event_base_free(eventBase);
-        eventBase = 0;
+        eventBase = nullptr;
     }
     LogPrint(BCLog::HTTP, "Stopped HTTP server\n");
 }
@@ -604,14 +603,14 @@ void HTTPRequest::WriteReply(int nStatus, const std::string &strReply) {
     struct evbuffer *evb = evhttp_request_get_output_buffer(req);
     assert(evb);
     evbuffer_add(evb, strReply.data(), strReply.size());
-    HTTPEvent *ev =
-        new HTTPEvent(eventBase, true, std::bind(evhttp_send_reply, req,
-                                                 nStatus, (const char *)nullptr,
-                                                 (struct evbuffer *)nullptr));
-    ev->trigger(0);
+    HTTPEvent *ev = new HTTPEvent(eventBase, true,
+                                  std::bind(evhttp_send_reply, req, nStatus,
+                                            (const char *)nullptr,
+                                            (struct evbuffer *)nullptr));
+    ev->trigger(nullptr);
     replySent = true;
     // transferred back to main thread.
-    req = 0;
+    req = nullptr;
 }
 
 CService HTTPRequest::GetPeer() {

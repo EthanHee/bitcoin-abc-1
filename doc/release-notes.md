@@ -1,19 +1,12 @@
-Bitcoin ABC version 0.18.3 is now available from:
+Bitcoin ABC version 0.19.0 is now available from:
 
-  <https://download.bitcoinabc.org/0.18.3/>
+  <https://download.bitcoinabc.org/0.19.0/>
 
 This release includes the following features and fixes:
- - Remove support for Qt4
- - Upgrade reproducible build to use Qt 5.9.6
- - Improve SHA256 performance using SSE4.1, AVX2 and/or SHA if available.
- - Add a mode argument to the `getmemoryinfo` RPC call to query `malloc_info` from the system if available.
- - Updated univalue library to version 1.0.4
- - Disable safe mode by default
- - Added autocomplete to 'help' in RPC console
- - Deprecated estimatefee RPC command
- - Improved help message for backup wallet RPC
- - Various bug fixes that improve node stability and performance
- - Backport getblock RPC's new verbosity mode from bitcoin core for retrieving all transactions of a given block in full.
- - Added parkblock/unparkblock RPC commands and 'parked' state to getchaintips RPC
- - RPC `listreceivedbyaddress` now accepts an address filter
- - Backport combinerawtransaction RPC from bitcoin core to combine multiple partially signed transactions into one transaction.
+ - Support for May 2019 upgrade features, as detailed at https://github.com/bitcoincashorg/bitcoincash.org/blob/master/spec/2019-05-15-upgrade.md
+    - Schnorr signatures in OP_CHECK(DATA)SIG(VERIFY): https://github.com/bitcoincashorg/bitcoincash.org/blob/master/spec/2019-05-15-schnorr.md
+    - Segwit P2SH recovery: https://github.com/bitcoincashorg/bitcoincash.org/blob/master/spec/2019-05-15-segwit-recovery.md
+ - Bump automatic replay protection to November 2019 upgrade
+ - Fix bitcoin-qt crash on start for users who had previously selected minimum absolute fee.
+ - Fix a regression in `getrawtransaction` output where `confirmations`, `time`, and `blocktime` were not present.
+ - Fixed incorrect naming for the bitcoin-qt.desktop icon for Debian/Ubuntu distributions.

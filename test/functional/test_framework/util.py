@@ -168,12 +168,12 @@ def assert_is_hash_string(string, length=64):
 
 def assert_array_result(object_array, to_match, expected, should_not_find=False):
     """
-        Pass in array of JSON objects, a dictionary with key/value pairs
-        to match against, and another dictionary with expected key/value
-        pairs.
-        If the should_not_find flag is true, to_match should not be found
-        in object_array
-        """
+    Pass in array of JSON objects, a dictionary with key/value pairs
+    to match against, and another dictionary with expected key/value
+    pairs.
+    If the should_not_find flag is true, to_match should not be found
+    in object_array
+    """
     if should_not_find:
         assert_equal(expected, {})
     num_matched = 0
@@ -310,16 +310,10 @@ def rpc_port(n):
     return PORT_MIN + PORT_RANGE + n + (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
 
 
-def rpc_url(datadir, i, rpchost=None):
+def rpc_url(datadir, host, port):
     rpc_u, rpc_p = get_auth_cookie(datadir)
-    host = '127.0.0.1'
-    port = rpc_port(i)
-    if rpchost:
-        parts = rpchost.split(':')
-        if len(parts) == 2:
-            host, port = parts
-        else:
-            host = rpchost
+    if host == None:
+        host = '127.0.0.1'
     return "http://%s:%s@%s:%d" % (rpc_u, rpc_p, host, int(port))
 
 # Node functions
@@ -332,6 +326,7 @@ def initialize_datadir(dirname, n):
         os.makedirs(datadir)
     with open(os.path.join(datadir, "bitcoin.conf"), 'w', encoding='utf8') as f:
         f.write("regtest=1\n")
+        f.write("[regtest]\n")
         f.write("port=" + str(p2p_port(n)) + "\n")
         f.write("rpcport=" + str(rpc_port(n)) + "\n")
         f.write("listenonion=0\n")
@@ -380,30 +375,33 @@ def set_node_times(nodes, t):
         node.setmocktime(t)
 
 
-def disconnect_nodes(from_connection, node_num):
-    for peer_id in [peer['id'] for peer in from_connection.getpeerinfo() if "testnode%d" % node_num in peer['subver']]:
-        from_connection.disconnectnode(nodeid=peer_id)
+def disconnect_nodes(from_node, to_node):
+    for peer_id in [peer['id'] for peer in from_node.getpeerinfo() if to_node.name in peer['subver']]:
+        from_node.disconnectnode(nodeid=peer_id)
 
     for _ in range(50):
-        if [peer['id'] for peer in from_connection.getpeerinfo() if "testnode%d" % node_num in peer['subver']] == []:
+        if [peer['id'] for peer in from_node.getpeerinfo() if to_node.name in peer['subver']] == []:
             break
         time.sleep(0.1)
     else:
         raise AssertionError("timed out waiting for disconnect")
 
 
-def connect_nodes(from_connection, node_num):
-    ip_port = "127.0.0.1:" + str(p2p_port(node_num))
-    from_connection.addnode(ip_port, "onetry")
+def connect_nodes(from_node, to_node):
+    host = to_node.host
+    if host == None:
+        host = '127.0.0.1'
+    ip_port = host + ':' + str(to_node.p2p_port)
+    from_node.addnode(ip_port, "onetry")
     # poll until version handshake complete to avoid race conditions
     # with transaction relaying
-    while any(peer['version'] == 0 for peer in from_connection.getpeerinfo()):
+    while any(peer['version'] == 0 for peer in from_node.getpeerinfo()):
         time.sleep(0.1)
 
 
-def connect_nodes_bi(nodes, a, b):
-    connect_nodes(nodes[a], b)
-    connect_nodes(nodes[b], a)
+def connect_nodes_bi(a, b):
+    connect_nodes(a, b)
+    connect_nodes(b, a)
 
 
 def sync_blocks(rpc_connections, *, wait=1, timeout=60):

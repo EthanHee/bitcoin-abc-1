@@ -9,7 +9,6 @@
 
 #include "amount.h"
 
-class CBlockPolicyEstimator;
 class CCoinControl;
 class CFeeRate;
 class CTxMemPool;
@@ -23,9 +22,9 @@ Amount GetMinimumFee(unsigned int nTxBytes, unsigned int nConfirmTarget,
                      const CTxMemPool &pool);
 
 /**
-* Estimate the minimum fee considering required fee and targetFee or if 0
-* then fee estimation for nConfirmTarget
-*/
+ * Estimate the minimum fee considering required fee and targetFee or if 0
+ * then fee estimation for nConfirmTarget
+ */
 
 Amount GetMinimumFee(unsigned int nTxBytes, unsigned int nConfirmTarget,
                      const CTxMemPool &pool, Amount targetFee);

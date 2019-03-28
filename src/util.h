@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <exception>
 #include <map>
+#include <set>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -98,16 +99,33 @@ inline bool IsSwitchChar(char c) {
 
 class ArgsManager {
 protected:
+    friend class ArgsManagerHelper;
+
     mutable CCriticalSection cs_args;
-    std::map<std::string, std::string> mapArgs;
-    std::map<std::string, std::vector<std::string>> mapMultiArgs;
-    std::unordered_set<std::string> m_negated_args;
+    std::map<std::string, std::vector<std::string>> m_override_args;
+    std::map<std::string, std::vector<std::string>> m_config_args;
+    std::string m_network;
+    std::set<std::string> m_network_only_args;
 
     void ReadConfigStream(std::istream &stream);
 
 public:
+    ArgsManager();
+
+    /**
+     * Select the network in use
+     */
+    void SelectConfigNetwork(const std::string &network);
+
     void ParseParameters(int argc, const char *const argv[]);
     void ReadConfigFile(const std::string &confPath);
+
+    /**
+     * Log warnings for options in m_section_only_args when they are specified
+     * in the default section but not overridden on the command line or in a
+     * network-specific section in the config file.
+     */
+    void WarnForSectionOnlyArgs();
 
     /**
      * Return a vector of strings of the given argument
@@ -197,13 +215,14 @@ public:
 
     // Remove an arg setting, used only in testing
     void ClearArg(const std::string &strArg);
-
-private:
-    // Munge -nofoo into -foo=0 and track the value as negated.
-    void InterpretNegatedOption(std::string &key, std::string &val);
 };
 
 extern ArgsManager gArgs;
+
+/**
+ * @return true if help has been requested via a command-line arg
+ */
+bool HelpRequested(const ArgsManager &args);
 
 /**
  * Format a string to be used as group of options in help messages.
@@ -255,5 +274,11 @@ template <typename Callable> void TraceThread(const char *name, Callable func) {
 }
 
 std::string CopyrightHolders(const std::string &strPrefix);
+
+//! Substitute for C++14 std::make_unique.
+template <typename T, typename... Args>
+std::unique_ptr<T> MakeUnique(Args &&... args) {
+    return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+}
 
 #endif // BITCOIN_UTIL_H
