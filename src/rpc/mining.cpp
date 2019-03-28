@@ -636,7 +636,7 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
     static int64_t nStart;
     static std::unique_ptr<CBlockTemplate> pblocktemplate;
     if (pindexPrev != chainActive.Tip() ||
-        (mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast &&
+        (g_mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast &&
          GetTime() - nStart > 5)) {
         // Clear pindexPrev so future calls make a new block, despite any
         // failures from here on
