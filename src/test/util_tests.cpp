@@ -2,19 +2,24 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "util.h"
+#include <util.h>
 
-#include "clientversion.h"
-#include "primitives/transaction.h"
-#include "sync.h"
-#include "test/test_bitcoin.h"
-#include "utilmoneystr.h"
-#include "utilstrencodings.h"
+#include <clientversion.h>
+#include <primitives/transaction.h>
+#include <sync.h>
+#include <utilmoneystr.h>
+#include <utilstrencodings.h>
 
-#include <cstdint>
-#include <vector>
+#include <test/test_bitcoin.h>
 
 #include <boost/test/unit_test.hpp>
+
+#include <cstdint>
+#ifndef WIN32
+#include <sys/types.h>
+#include <sys/wait.h>
+#endif
+#include <vector>
 
 BOOST_FIXTURE_TEST_SUITE(util_tests, BasicTestingSetup)
 
@@ -808,7 +813,7 @@ BOOST_AUTO_TEST_CASE(util_seed_insecure_rand) {
     SeedInsecureRand(true);
     for (int mod = 2; mod < 11; mod++) {
         int mask = 1;
-        // Really rough binomal confidence approximation.
+        // Really rough binomial confidence approximation.
         int err =
             30 * 10000. / mod * sqrt((1. / mod * (1 - 1. / mod)) / 10000.);
         // mask is 2^ceil(log2(mod))-1
@@ -882,7 +887,8 @@ BOOST_AUTO_TEST_CASE(test_ParseInt32) {
     BOOST_CHECK(ParseInt32("1234", &n) && n == 1234);
     BOOST_CHECK(ParseInt32("01234", &n) && n == 1234); // no octal
     BOOST_CHECK(ParseInt32("2147483647", &n) && n == 2147483647);
-    BOOST_CHECK(ParseInt32("-2147483648", &n) && n == -2147483648);
+    // (-2147483647 - 1) equals INT_MIN
+    BOOST_CHECK(ParseInt32("-2147483648", &n) && n == (-2147483647 - 1));
     BOOST_CHECK(ParseInt32("-1234", &n) && n == -1234);
     // Invalid values
     BOOST_CHECK(!ParseInt32("", &n));
@@ -1182,6 +1188,148 @@ BOOST_AUTO_TEST_CASE(test_ParseFixedPoint) {
     BOOST_CHECK(!ParseFixedPoint("1.", 8, &amount));
 }
 
+static void TestOtherThread(fs::path dirname, std::string lockname,
+                            bool *result) {
+    *result = LockDirectory(dirname, lockname);
+}
+
+#ifndef WIN32 // Cannot do this test on WIN32 due to lack of fork()
+static constexpr char LockCommand = 'L';
+static constexpr char UnlockCommand = 'U';
+static constexpr char ExitCommand = 'X';
+
+static void TestOtherProcess(fs::path dirname, std::string lockname, int fd) {
+    char ch;
+    int rv;
+    while (true) {
+        rv = read(fd, &ch, 1); // Wait for command
+        assert(rv == 1);
+        switch (ch) {
+            case LockCommand:
+                ch = LockDirectory(dirname, lockname);
+                rv = write(fd, &ch, 1);
+                assert(rv == 1);
+                break;
+            case UnlockCommand:
+                ReleaseDirectoryLocks();
+                ch = true; // Always succeeds
+                rv = write(fd, &ch, 1);
+                break;
+            case ExitCommand:
+                close(fd);
+                exit(0);
+            default:
+                assert(0);
+        }
+    }
+}
+#endif
+
+BOOST_AUTO_TEST_CASE(test_LockDirectory) {
+    fs::path dirname = fs::temp_directory_path() / fs::unique_path();
+    const std::string lockname = ".lock";
+#ifndef WIN32
+    // Revert SIGCHLD to default, otherwise boost.test will catch and fail on
+    // it: there is BOOST_TEST_IGNORE_SIGCHLD but that only works when defined
+    // at build-time of the boost library
+    void (*old_handler)(int) = signal(SIGCHLD, SIG_DFL);
+
+    // Fork another process for testing before creating the lock, so that we
+    // won't fork while holding the lock (which might be undefined, and is not
+    // relevant as test case as that is avoided with -daemonize).
+    int fd[2];
+    BOOST_CHECK_EQUAL(socketpair(AF_UNIX, SOCK_STREAM, 0, fd), 0);
+    pid_t pid = fork();
+    if (!pid) {
+        BOOST_CHECK_EQUAL(close(fd[1]), 0); // Child: close parent end
+        TestOtherProcess(dirname, lockname, fd[0]);
+    }
+    BOOST_CHECK_EQUAL(close(fd[0]), 0); // Parent: close child end
+#endif
+    // Lock on non-existent directory should fail
+    BOOST_CHECK_EQUAL(LockDirectory(dirname, lockname), false);
+
+    fs::create_directories(dirname);
+
+    // Probing lock on new directory should succeed
+    BOOST_CHECK_EQUAL(LockDirectory(dirname, lockname, true), true);
+
+    // Persistent lock on new directory should succeed
+    BOOST_CHECK_EQUAL(LockDirectory(dirname, lockname), true);
+
+    // Another lock on the directory from the same thread should succeed
+    BOOST_CHECK_EQUAL(LockDirectory(dirname, lockname), true);
+
+    // Another lock on the directory from a different thread within the same
+    // process should succeed
+    bool threadresult;
+    std::thread thr(TestOtherThread, dirname, lockname, &threadresult);
+    thr.join();
+    BOOST_CHECK_EQUAL(threadresult, true);
+#ifndef WIN32
+    // Try to aquire lock in child process while we're holding it, this should
+    // fail.
+    char ch;
+    BOOST_CHECK_EQUAL(write(fd[1], &LockCommand, 1), 1);
+    BOOST_CHECK_EQUAL(read(fd[1], &ch, 1), 1);
+    BOOST_CHECK_EQUAL((bool)ch, false);
+
+    // Give up our lock
+    ReleaseDirectoryLocks();
+    // Probing lock from our side now should succeed, but not hold on to the
+    // lock.
+    BOOST_CHECK_EQUAL(LockDirectory(dirname, lockname, true), true);
+
+    // Try to acquire the lock in the child process, this should be succesful.
+    BOOST_CHECK_EQUAL(write(fd[1], &LockCommand, 1), 1);
+    BOOST_CHECK_EQUAL(read(fd[1], &ch, 1), 1);
+    BOOST_CHECK_EQUAL((bool)ch, true);
+
+    // When we try to probe the lock now, it should fail.
+    BOOST_CHECK_EQUAL(LockDirectory(dirname, lockname, true), false);
+
+    // Unlock the lock in the child process
+    BOOST_CHECK_EQUAL(write(fd[1], &UnlockCommand, 1), 1);
+    BOOST_CHECK_EQUAL(read(fd[1], &ch, 1), 1);
+    BOOST_CHECK_EQUAL((bool)ch, true);
+
+    // When we try to probe the lock now, it should succeed.
+    BOOST_CHECK_EQUAL(LockDirectory(dirname, lockname, true), true);
+
+    // Re-lock the lock in the child process, then wait for it to exit, check
+    // successful return. After that, we check that exiting the process
+    // has released the lock as we would expect by probing it.
+    int processstatus;
+    BOOST_CHECK_EQUAL(write(fd[1], &LockCommand, 1), 1);
+    BOOST_CHECK_EQUAL(write(fd[1], &ExitCommand, 1), 1);
+    BOOST_CHECK_EQUAL(waitpid(pid, &processstatus, 0), pid);
+    BOOST_CHECK_EQUAL(processstatus, 0);
+    BOOST_CHECK_EQUAL(LockDirectory(dirname, lockname, true), true);
+
+    // Restore SIGCHLD
+    signal(SIGCHLD, old_handler);
+    BOOST_CHECK_EQUAL(close(fd[1]), 0); // Close our side of the socketpair
+#endif
+    // Clean up
+    ReleaseDirectoryLocks();
+    fs::remove_all(dirname);
+}
+
+BOOST_AUTO_TEST_CASE(test_DirIsWritable) {
+    // Should be able to write to the system tmp dir.
+    fs::path tmpdirname = fs::temp_directory_path();
+    BOOST_CHECK_EQUAL(DirIsWritable(tmpdirname), true);
+
+    // Should not be able to write to a non-existent dir.
+    tmpdirname = fs::temp_directory_path() / fs::unique_path();
+    BOOST_CHECK_EQUAL(DirIsWritable(tmpdirname), false);
+
+    fs::create_directory(tmpdirname);
+    // Should be able to write to it now.
+    BOOST_CHECK_EQUAL(DirIsWritable(tmpdirname), true);
+    fs::remove(tmpdirname);
+}
+
 template <int F, int T>
 static void CheckConvertBits(const std::vector<uint8_t> &in,
                              const std::vector<uint8_t> &expected) {
@@ -1237,6 +1385,42 @@ BOOST_AUTO_TEST_CASE(test_ConvertBits) {
     CheckConvertBits<8, 5>({0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef},
                            {0x00, 0x04, 0x11, 0x14, 0x0a, 0x19, 0x1c, 0x09,
                             0x15, 0x0f, 0x06, 0x1e, 0x1e});
+}
+
+BOOST_AUTO_TEST_CASE(test_ToLower) {
+    BOOST_CHECK_EQUAL(ToLower('@'), '@');
+    BOOST_CHECK_EQUAL(ToLower('A'), 'a');
+    BOOST_CHECK_EQUAL(ToLower('Z'), 'z');
+    BOOST_CHECK_EQUAL(ToLower('['), '[');
+    BOOST_CHECK_EQUAL(ToLower(0), 0);
+    BOOST_CHECK_EQUAL(ToLower(255), 255);
+
+    std::string testVector;
+    Downcase(testVector);
+    BOOST_CHECK_EQUAL(testVector, "");
+
+    testVector = "#HODL";
+    Downcase(testVector);
+    BOOST_CHECK_EQUAL(testVector, "#hodl");
+
+    testVector = "\x00\xfe\xff";
+    Downcase(testVector);
+    BOOST_CHECK_EQUAL(testVector, "\x00\xfe\xff");
+}
+
+BOOST_AUTO_TEST_CASE(test_ToUpper) {
+    BOOST_CHECK_EQUAL(ToUpper('`'), '`');
+    BOOST_CHECK_EQUAL(ToUpper('a'), 'A');
+    BOOST_CHECK_EQUAL(ToUpper('z'), 'Z');
+    BOOST_CHECK_EQUAL(ToUpper('{'), '{');
+    BOOST_CHECK_EQUAL(ToUpper(0), 0);
+    BOOST_CHECK_EQUAL(ToUpper(255), 255);
+}
+
+BOOST_AUTO_TEST_CASE(test_Capitalize) {
+    BOOST_CHECK_EQUAL(Capitalize(""), "");
+    BOOST_CHECK_EQUAL(Capitalize("bitcoin"), "Bitcoin");
+    BOOST_CHECK_EQUAL(Capitalize("\x00\xfe\xff"), "\x00\xfe\xff");
 }
 
 BOOST_AUTO_TEST_SUITE_END()

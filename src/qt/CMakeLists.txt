@@ -18,6 +18,10 @@ if(QT_CORE_TYPE MATCHES STATIC)
 	set(QT_STATIC_BUILD ON)
 endif()
 
+# Determine the Qt libraries directory from the QT5::Core library location
+get_target_property(QT_CORE_LIB_LOCATION Qt5::Core LOCATION)
+get_filename_component(QT5_LIB_DIR "${QT_CORE_LIB_LOCATION}" DIRECTORY)
+
 set(STATIC_DEPENDENCIES_CMAKE_FILE "${CMAKE_BINARY_DIR}/QtStaticDependencies.cmake")
 if(EXISTS ${STATIC_DEPENDENCIES_CMAKE_FILE})
 	file(REMOVE ${STATIC_DEPENDENCIES_CMAKE_FILE})
@@ -28,10 +32,11 @@ macro(CONVERT_PRL_LIBS_TO_CMAKE _qt_component)
 	if(TARGET Qt5::${_qt_component})
 		get_target_property(_lib_location Qt5::${_qt_component} LOCATION)
 		execute_process(COMMAND ${PERL_EXECUTABLE} "${CONVERT_PRL_PATH}"
-			--lib ${_lib_location}
-			--out ${STATIC_DEPENDENCIES_CMAKE_FILE}
-			--component ${_qt_component}
-			--compiler ${CMAKE_CXX_COMPILER_ID}
+			--lib "${_lib_location}"
+			--qt_lib_install_dir "${QT5_LIB_DIR}"
+			--out "${STATIC_DEPENDENCIES_CMAKE_FILE}"
+			--component "${_qt_component}"
+			--compiler "${CMAKE_CXX_COMPILER_ID}"
 		)
 	endif()
 endmacro()
@@ -40,9 +45,9 @@ if(QT_STATIC_BUILD)
 	foreach(qt_module ${QT_REQUIRED_COMPONENTS})
 		CONVERT_PRL_LIBS_TO_CMAKE(${qt_module})
 	endforeach()
-    # HACK: We must explicitly add LIB path of the Qt installation
-    # to correctly find qtpcre
-    link_directories(${_qt5_install_prefix}/../)
+	# HACK: We must explicitly add LIB path of the Qt installation
+	# to correctly find qtpcre
+	link_directories("${QT5_LIB_DIR}")
 
 	# Now that we generated the dependencies, import them.
 	set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CONVERT_PRL_PATH}")
@@ -78,6 +83,13 @@ add_custom_command(OUTPUT qrc_bitcoin_locale.cpp
 )
 
 # UI elements
+# qt5_wrap_ui() generates the files in the CMAKE_CURRENT_BINARY_DIR. As there
+# is no option to change the output directory, moving the files to the forms
+# subdirectory requires to override the variable. It is reset to its actual
+# value after the call so it does not impact the other sections of this
+# CMakeLists.txt file.
+set(SAVE_CMAKE_CURRENT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
+set(CMAKE_CURRENT_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/forms")
 qt5_wrap_ui(UI_GENERATED_HEADERS
 	forms/addressbookpage.ui
 	forms/askpassphrasedialog.ui
@@ -97,6 +109,7 @@ qt5_wrap_ui(UI_GENERATED_HEADERS
 	forms/signverifymessagedialog.ui
 	forms/transactiondescdialog.ui
 )
+set(CMAKE_CURRENT_BINARY_DIR ${SAVE_CMAKE_CURRENT_BINARY_DIR})
 
 # Qt MOC
 set(CMAKE_AUTOMOC ON)
@@ -151,14 +164,6 @@ add_library(bitcoin-qt-base
 if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 	target_sources(bitcoin-qt-base PRIVATE winshutdownmonitor.cpp)
 endif()
-
-target_include_directories(bitcoin-qt-base
-	PUBLIC
-		.
-		${CMAKE_CURRENT_BINARY_DIR}
-		${CMAKE_CURRENT_BINARY_DIR}/forms
-		${Protobuf_INCLUDE_DIRS}
-)
 
 target_link_libraries(bitcoin-qt-base
 	server

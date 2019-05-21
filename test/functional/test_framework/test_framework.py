@@ -4,31 +4,30 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Base class for RPC testing."""
 
+import argparse
 from collections import deque
 from enum import Enum
 import logging
-import argparse
 import os
 import pdb
 import shutil
 import sys
 import tempfile
 import time
-import traceback
 
 from .authproxy import JSONRPCException
 from . import coverage
 from .test_node import TestNode
 from .util import (
-    MAX_NODES,
-    PortSeed,
     assert_equal,
     check_json_precision,
     connect_nodes_bi,
     disconnect_nodes,
     initialize_datadir,
     log_filename,
+    MAX_NODES,
     p2p_port,
+    PortSeed,
     rpc_port,
     set_node_times,
     sync_blocks,
@@ -45,6 +44,9 @@ class TestStatus(Enum):
 TEST_EXIT_PASSED = 0
 TEST_EXIT_FAILED = 1
 TEST_EXIT_SKIPPED = 77
+
+# Timestamp is 01.01.2019
+TIMESTAMP_IN_THE_PAST = 1546300800
 
 
 class BitcoinTestFramework():
@@ -98,6 +100,8 @@ class BitcoinTestFramework():
                             help="Attach a python debugger if test fails")
         parser.add_argument("--usecli", dest="usecli", default=False, action="store_true",
                             help="use bitcoin-cli instead of RPC for all commands")
+        parser.add_argument("--with-greatwallactivation", dest="greatwallactivation", default=False, action="store_true",
+                            help="Activate great wall update on timestamp {}".format(TIMESTAMP_IN_THE_PAST))
         self.add_options(parser)
         self.options = parser.parse_args()
 
@@ -135,7 +139,7 @@ class BitcoinTestFramework():
         except JSONRPCException as e:
             self.log.exception("JSONRPC error")
         except SkipTest as e:
-            self.log.warning("Test Skipped: %s" % e.message)
+            self.log.warning("Test Skipped: {}".format(e.message))
             success = TestStatus.SKIPPED
         except AssertionError as e:
             self.log.exception("Assertion failed")
@@ -162,7 +166,8 @@ class BitcoinTestFramework():
             self.log.info("Cleaning up")
             shutil.rmtree(self.options.tmpdir)
         else:
-            self.log.warning("Not cleaning up dir %s" % self.options.tmpdir)
+            self.log.warning(
+                "Not cleaning up dir {}".format(self.options.tmpdir))
             if os.getenv("PYTHON_DEBUG", ""):
                 # Dump the end of the debug logs, to aid in debugging rare
                 # travis failures.
@@ -177,7 +182,7 @@ class BitcoinTestFramework():
                             print("From", fn, ":")
                             print("".join(deque(f, MAX_LINES_TO_PRINT)))
                     except OSError:
-                        print("Opening file %s failed." % fn)
+                        print("Opening file {} failed.".format(fn))
                         traceback.print_exc()
 
         if success == TestStatus.PASSED:
@@ -188,7 +193,7 @@ class BitcoinTestFramework():
             sys.exit(TEST_EXIT_SKIPPED)
         else:
             self.log.error(
-                "Test failed. Test logging available at %s/test_framework.log", self.options.tmpdir)
+                "Test failed. Test logging available at {}/test_framework.log".format(self.options.tmpdir))
             logging.shutdown()
             sys.exit(TEST_EXIT_FAILED)
 
@@ -246,6 +251,9 @@ class BitcoinTestFramework():
         for i in range(num_nodes):
             self.nodes.append(TestNode(i, self.options.tmpdir, extra_args[i], rpchost, rpc_port=rpc_port(i), p2p_port=p2p_port(i),
                                        timewait=timewait, binary=binary[i], stderr=None, mocktime=self.mocktime, coverage_dir=self.options.coveragedir, use_cli=self.options.usecli))
+            if self.options.greatwallactivation:
+                self.nodes[i].extend_default_args(
+                    ["-greatwallactivationtime={}".format(TIMESTAMP_IN_THE_PAST)])
 
     def start_node(self, i, *args, **kwargs):
         """Start a bitcoind"""
@@ -348,21 +356,6 @@ class BitcoinTestFramework():
             sync_blocks(group)
             sync_mempools(group)
 
-    def enable_mocktime(self):
-        """Enable mocktime for the script.
-
-        mocktime may be needed for scripts that use the cached version of the
-        blockchain.  If the cached version of the blockchain is used without
-        mocktime then the mempools will not sync due to IBD.
-
-        For backwared compatibility of the python scripts with previous
-        versions of the cache, this helper function sets mocktime to Jan 1,
-        2014 + (201 * 10 * 60)"""
-        self.mocktime = 1388534400 + (201 * 10 * 60)
-
-    def disable_mocktime(self):
-        self.mocktime = 0
-
     # Private helper methods. These should not be accessed by the subclass test scripts.
 
     def _start_logging(self):
@@ -422,18 +415,28 @@ class BitcoinTestFramework():
             # Create cache directories, run bitcoinds:
             for i in range(MAX_NODES):
                 datadir = initialize_datadir(self.options.cachedir, i)
-                args = [os.getenv("BITCOIND", "bitcoind"), "-server",
-                        "-keypool=1", "-datadir=" + datadir, "-discover=0"]
-                if i > 0:
-                    args.append("-connect=127.0.0.1:" + str(p2p_port(0)))
                 self.nodes.append(TestNode(i, self.options.cachedir, extra_args=[], host=None, rpc_port=rpc_port(i), p2p_port=p2p_port(i),
                                            timewait=None, binary=None, stderr=None, mocktime=self.mocktime, coverage_dir=None))
-                self.nodes[i].args = args
+                self.nodes[i].clear_default_args()
+                self.nodes[i].extend_default_args([
+                    "-server", "-keypool=1", "-datadir=" + datadir,
+                    "-discover=0"])
+                if i > 0:
+                    self.nodes[i].extend_default_args(
+                        ["-connect=127.0.0.1:" + str(p2p_port(0))])
+                if self.options.greatwallactivation:
+                    self.nodes[i].extend_default_args(
+                        ["-greatwallactivationtime={}".format(TIMESTAMP_IN_THE_PAST)])
                 self.start_node(i)
 
             # Wait for RPC connections to be ready
             for node in self.nodes:
                 node.wait_for_rpc_connection()
+
+            # For backwared compatibility of the python scripts with previous
+            # versions of the cache, set mocktime to Jan 1,
+            # 2014 + (201 * 10 * 60)
+            self.mocktime = 1388534400 + (201 * 10 * 60)
 
             # Create a 200-block-long chain; each of the 4 first nodes
             # gets 25 mature blocks and 25 immature.
@@ -442,7 +445,6 @@ class BitcoinTestFramework():
             #
             # blocks are created with timestamps 10 minutes apart
             # starting from 2010 minutes in the past
-            self.enable_mocktime()
             block_time = self.mocktime - (201 * 10 * 60)
             for i in range(2):
                 for peer in range(4):
@@ -456,7 +458,7 @@ class BitcoinTestFramework():
             # Shut them down, and clean up cache directories:
             self.stop_nodes()
             self.nodes = []
-            self.disable_mocktime()
+            self.mocktime = 0
             for i in range(MAX_NODES):
                 os.remove(log_filename(self.options.cachedir, i, "debug.log"))
                 os.remove(log_filename(

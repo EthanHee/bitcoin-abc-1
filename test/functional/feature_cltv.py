@@ -8,12 +8,30 @@ Test that the CHECKLOCKTIMEVERIFY soft-fork activates at (regtest) block height
 1351.
 """
 
+from test_framework.blocktools import create_block, create_coinbase
+from test_framework.messages import (
+    CTransaction,
+    FromHex,
+    msg_block,
+    msg_tx,
+    ToHex,
+)
+from test_framework.mininode import (
+    mininode_lock,
+    network_thread_start,
+    P2PInterface,
+)
+from test_framework.script import (
+    CScript,
+    CScriptNum,
+    OP_1NEGATE,
+    OP_CHECKLOCKTIMEVERIFY,
+    OP_DROP,
+    OP_TRUE,
+)
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import *
-from test_framework.mininode import *
-from test_framework.blocktools import create_coinbase, create_block
-from test_framework.script import CScript, CScriptNum, OP_1NEGATE, OP_CHECKLOCKTIMEVERIFY, OP_DROP, OP_TRUE
 from test_framework.txtools import pad_tx
+from test_framework.util import assert_equal, wait_until
 
 CLTV_HEIGHT = 1351
 
@@ -44,7 +62,7 @@ def cltv_lock_to_height(node, tx, height=-1):
         [height_op, OP_CHECKLOCKTIMEVERIFY, OP_DROP, OP_TRUE])
     tx.rehash()
 
-    signed_result = node.signrawtransaction(ToHex(tx))
+    signed_result = node.signrawtransactionwithwallet(ToHex(tx))
 
     new_tx = FromHex(CTransaction(), signed_result['hex'])
     pad_tx(new_tx)
@@ -58,7 +76,7 @@ def spend_from_coinbase(node, coinbase, to_address, amount):
     inputs = [{"txid": from_txid, "vout": 0}]
     outputs = {to_address: amount}
     rawtx = node.createrawtransaction(inputs, outputs)
-    signresult = node.signrawtransaction(rawtx)
+    signresult = node.signrawtransactionwithwallet(rawtx)
     tx = FromHex(CTransaction(), signresult['hex'])
     return tx
 
@@ -156,7 +174,8 @@ class BIP65Test(BitcoinTestFramework):
         output = {self.nodeaddress: 49.98}
 
         rejectedtx_raw = self.nodes[0].createrawtransaction(inputs, output)
-        rejectedtx_signed = self.nodes[0].signrawtransaction(rejectedtx_raw)
+        rejectedtx_signed = self.nodes[0].signrawtransactionwithwallet(
+            rejectedtx_raw)
 
         # Couldn't complete signature due to CLTV
         assert(rejectedtx_signed['errors'][0]['error'] == 'Negative locktime')

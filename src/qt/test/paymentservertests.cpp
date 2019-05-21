@@ -2,17 +2,18 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "paymentservertests.h"
+#include <qt/test/paymentservertests.h>
 
-#include "optionsmodel.h"
-#include "paymentrequestdata.h"
+#include <amount.h>
+#include <interfaces/node.h>
+#include <qt/optionsmodel.h>
+#include <random.h>
+#include <script/script.h>
+#include <script/standard.h>
+#include <util.h>
+#include <utilstrencodings.h>
 
-#include "amount.h"
-#include "random.h"
-#include "script/script.h"
-#include "script/standard.h"
-#include "util.h"
-#include "utilstrencodings.h"
+#include <qt/test/paymentrequestdata.h>
 
 #include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
@@ -64,7 +65,8 @@ static SendCoinsRecipient handleRequest(PaymentServer *server,
 
 void PaymentServerTests::paymentServerTests() {
     SelectParams(CBaseChainParams::MAIN);
-    OptionsModel optionsModel;
+    auto node = interfaces::MakeNode();
+    OptionsModel optionsModel(*node);
     PaymentServer *server = new PaymentServer(nullptr, false);
     X509_STORE *caStore = X509_STORE_new();
     X509_STORE_add_cert(caStore, parse_b64der_cert(caCert1_BASE64));
@@ -143,9 +145,9 @@ void PaymentServerTests::paymentServerTests() {
     byteArray = QByteArray((const char *)&data[0], data.size());
     r.paymentRequest.parse(byteArray);
     // Ensure the request is initialized, because network "main" is default,
-    // even for uninizialized payment requests and that will fail our test here.
+    // even for uninitialized payment requests and that will fail our test here.
     QVERIFY(r.paymentRequest.IsInitialized());
-    QCOMPARE(PaymentServer::verifyNetwork(r.paymentRequest.getDetails()),
+    QCOMPARE(PaymentServer::verifyNetwork(*node, r.paymentRequest.getDetails()),
              false);
 
     // Expired payment request (expires is set to 1 = 1970-01-01 00:00:01):
@@ -214,6 +216,6 @@ void PaymentServerTests::paymentServerTests() {
     delete server;
 }
 
-void RecipientCatcher::getRecipient(SendCoinsRecipient r) {
+void RecipientCatcher::getRecipient(const SendCoinsRecipient &r) {
     recipient = r;
 }

@@ -3,31 +3,31 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "rpc/mining.h"
-#include "amount.h"
-#include "blockvalidity.h"
-#include "chain.h"
-#include "chainparams.h"
-#include "config.h"
-#include "consensus/consensus.h"
-#include "consensus/params.h"
-#include "consensus/validation.h"
+#include <amount.h>
+#include <blockvalidity.h>
+#include <chain.h>
+#include <chainparams.h>
+#include <config.h>
+#include <consensus/consensus.h>
+#include <consensus/params.h>
+#include <consensus/validation.h>
+#include <core_io.h>
+#include <dstencode.h>
+#include <init.h>
+#include <miner.h>
+#include <net.h>
+#include <policy/policy.h>
+#include <pow.h>
+#include <rpc/blockchain.h>
+#include <rpc/mining.h>
+#include <rpc/server.h>
+#include <txmempool.h>
+#include <util.h>
+#include <utilstrencodings.h>
+#include <validation.h>
+#include <validationinterface.h>
+#include <warnings.h>
 #include "consensus/activation.h"
-#include "core_io.h"
-#include "dstencode.h"
-#include "init.h"
-#include "miner.h"
-#include "net.h"
-#include "policy/policy.h"
-#include "pow.h"
-#include "rpc/blockchain.h"
-#include "rpc/server.h"
-#include "txmempool.h"
-#include "util.h"
-#include "utilstrencodings.h"
-#include "validation.h"
-#include "validationinterface.h"
-#include "warnings.h"
 
 #include <univalue.h>
 
@@ -115,8 +115,8 @@ static UniValue getnetworkhashps(const Config &config,
 
     LOCK(cs_main);
     return GetNetworkHashPS(
-        request.params.size() > 0 ? request.params[0].get_int() : 120,
-        request.params.size() > 1 ? request.params[1].get_int() : -1);
+        !request.params[0].isNull() ? request.params[0].get_int() : 120,
+        !request.params[1].isNull() ? request.params[1].get_int() : -1);
 }
 
 UniValue generateBlocks(const Config &config,
@@ -137,7 +137,7 @@ UniValue generateBlocks(const Config &config,
 
     unsigned int nExtraNonce = 0;
     UniValue blockHashes(UniValue::VARR);
-    while (nHeight < nHeightEnd) {
+    while (nHeight < nHeightEnd && !ShutdownRequested()) {
         std::unique_ptr<CBlockTemplate> pblocktemplate(
             BlockAssembler(config, g_mempool)
                 .CreateNewBlock(coinbaseScript->reserveScript));
@@ -210,7 +210,7 @@ static UniValue generatetoaddress(const Config &config,
 
     int nGenerate = request.params[0].get_int();
     uint64_t nMaxTries = 1000000;
-    if (request.params.size() > 2) {
+    if (!request.params[2].isNull()) {
         nMaxTries = request.params[2].get_int();
     }
 
@@ -241,12 +241,16 @@ static UniValue getmininginfo(const Config &config,
             "  \"currentblocktx\": nnn,     (numeric) The last block "
             "transaction\n"
             "  \"difficulty\": xxx.xxxxx    (numeric) The current difficulty\n"
-            "  \"errors\": \"...\"            (string) Current errors\n"
             "  \"networkhashps\": nnn,      (numeric) The network hashes per "
             "second\n"
             "  \"pooledtx\": n              (numeric) The size of the mempool\n"
             "  \"chain\": \"xxxx\",           (string) current network name as "
             "defined in BIP70 (main, test, regtest)\n"
+            "  \"warnings\": \"...\"          (string) any network and "
+            "blockchain warnings\n"
+            "  \"errors\": \"...\"            (string) DEPRECATED. Same as "
+            "warnings. Only shown when bitcoind is started with "
+            "-deprecatedrpc=getmininginfo\n"
             "}\n"
             "\nExamples:\n" +
             HelpExampleCli("getmininginfo", "") +
@@ -263,10 +267,14 @@ static UniValue getmininginfo(const Config &config,
     obj.pushKV("blockprioritypercentage",
                uint8_t(gArgs.GetArg("-blockprioritypercentage",
                                     DEFAULT_BLOCK_PRIORITY_PERCENTAGE)));
-    obj.pushKV("errors", GetWarnings("statusbar"));
     obj.pushKV("networkhashps", getnetworkhashps(config, request));
     obj.pushKV("pooledtx", uint64_t(g_mempool.size()));
     obj.pushKV("chain", config.GetChainParams().NetworkIDString());
+    if (IsDeprecatedRPCEnabled(gArgs, "getmininginfo")) {
+        obj.pushKV("errors", GetWarnings("statusbar"));
+    } else {
+        obj.pushKV("warnings", GetWarnings("statusbar"));
+    }
     return obj;
 }
 
@@ -305,8 +313,8 @@ static UniValue prioritisetransaction(const Config &config,
     uint256 hash = ParseHashStr(request.params[0].get_str(), "txid");
     Amount nAmount = request.params[2].get_int64() * SATOSHI;
 
-    g_mempool.PrioritiseTransaction(hash, request.params[0].get_str(),
-                                    request.params[1].get_real(), nAmount);
+    g_mempool.PrioritiseTransaction(hash, request.params[1].get_real(),
+                                    nAmount);
     return true;
 }
 
@@ -332,15 +340,6 @@ static UniValue BIP22ValidationResult(const Config &config,
 
     // Should be impossible.
     return "valid?";
-}
-
-std::string gbt_vb_name(const Consensus::DeploymentPos pos) {
-    const struct BIP9DeploymentInfo &vbinfo = VersionBitsDeploymentInfo[pos];
-    std::string s = vbinfo.name;
-    if (!vbinfo.gbt_force) {
-        s.insert(s.begin(), '!');
-    }
-    return s;
 }
 
 static void makeMerkleBranch(const std::vector<uint256> &vtxhashs, std::vector<uint256> &steps)
@@ -493,7 +492,7 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
     std::string strMode = "template";
     UniValue lpval = NullUniValue;
     std::set<std::string> setClientRules;
-    if (request.params.size() > 0) {
+    if (!request.params[0].isNull()) {
         const UniValue &oparam = request.params[0].get_obj();
         const UniValue &modeval = find_value(oparam, "mode");
         if (modeval.isStr()) {
@@ -519,9 +518,8 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
             }
 
             uint256 hash = block.GetHash();
-            BlockMap::iterator mi = mapBlockIndex.find(hash);
-            if (mi != mapBlockIndex.end()) {
-                CBlockIndex *pindex = mi->second;
+            const CBlockIndex *pindex = LookupBlockIndex(hash);
+            if (pindex) {
                 if (pindex->IsValid(BlockValidity::SCRIPTS)) {
                     return "duplicate";
                 }
@@ -723,40 +721,28 @@ static UniValue getblocktemplatecommon(bool lightVersion, const Config &config,
     }
     else
     {
-        std::map<uint256, int64_t> setTxIndex;
-        int i = 0;
+        int index_in_template = 0;
         for (const auto &it : pblock->vtx) {
             const CTransaction &tx = *it;
             uint256 txId = tx.GetId();
-            setTxIndex[txId] = i++;
 
             if (tx.IsCoinBase()) {
+                index_in_template++;
                 continue;
             }
 
             UniValue entry(UniValue::VOBJ);
-
-            entry.push_back(Pair("data", EncodeHexTx(tx)));
-            entry.push_back(Pair("txid", txId.GetHex()));
-            entry.push_back(Pair("hash", tx.GetHash().GetHex()));
-
-            UniValue deps(UniValue::VARR);
-            for (const CTxIn &in : tx.vin) {
-                if (setTxIndex.count(in.prevout.GetTxId())) {
-                    deps.push_back(setTxIndex[in.prevout.GetTxId()]);
-                }
-            }
-            entry.push_back(Pair("depends", deps));
-
-            int index_in_template = i - 1;
-            entry.pushKV("fee",
-                        pblocktemplate->entries[index_in_template].fees / SATOSHI);
-            int64_t nTxSigOps =
-                pblocktemplate->entries[index_in_template].sigOpCount;
+            entry.pushKV("data", EncodeHexTx(tx));
+            entry.pushKV("txid", txId.GetHex());
+            entry.pushKV("hash", tx.GetHash().GetHex());
+            entry.pushKV("fee", pblocktemplate->entries[index_in_template].txFee /
+                                    SATOSHI);
+            int64_t nTxSigOps = pblocktemplate->entries[index_in_template].txSigOps;
             entry.pushKV("sigops", nTxSigOps);
 
-                transactions.push_back(entry);
-            }
+            transactions.push_back(entry);
+            index_in_template++;
+        }
     }
 
     UniValue aux(UniValue::VOBJ);
@@ -981,9 +967,8 @@ static UniValue submitblockcommon(const std::string& jobId, const Config &config
     bool fBlockPresent = false;
     {
         LOCK(cs_main);
-        BlockMap::iterator mi = mapBlockIndex.find(hash);
-        if (mi != mapBlockIndex.end()) {
-            CBlockIndex *pindex = mi->second;
+        const CBlockIndex *pindex = LookupBlockIndex(hash);
+        if (pindex) {
             if (pindex->IsValid(BlockValidity::SCRIPTS)) {
                 return "duplicate";
             }
@@ -1086,41 +1071,29 @@ static UniValue submitblocklight(const Config &config,
 
 static UniValue estimatefee(const Config &config,
                             const JSONRPCRequest &request) {
-    if (request.fHelp || request.params.size() != 1) {
+    if (request.fHelp || request.params.size() > 1) {
         throw std::runtime_error(
-            "estimatefee nblocks\n"
+            "estimatefee\n"
             "\nEstimates the approximate fee per kilobyte needed for a "
-            "transaction to begin\n"
-            "confirmation within nblocks blocks.\n"
-            "\nArguments:\n"
-            "1. nblocks     (numeric, required)\n"
+            "transaction\n"
             "\nResult:\n"
             "n              (numeric) estimated fee-per-kilobyte\n"
-            "\n"
-            "A negative value is returned if not enough transactions and "
-            "blocks\n"
-            "have been observed to make an estimate.\n"
-            "-1 is always returned for nblocks == 1 as it is impossible to "
-            "calculate\n"
-            "a fee that is high enough to get reliably included in the next "
-            "block.\n"
             "\nExample:\n" +
-            HelpExampleCli("estimatefee", "6"));
+            HelpExampleCli("estimatefee", ""));
     }
 
-    RPCTypeCheck(request.params, {UniValue::VNUM});
-
-    int nBlocks = request.params[0].get_int();
-    if (nBlocks < 1) {
-        nBlocks = 1;
+    if ((request.params.size() == 1) &&
+        !IsDeprecatedRPCEnabled(gArgs, "estimatefee")) {
+        // FIXME: Remove this message in 0.20
+        throw JSONRPCError(
+            RPC_METHOD_DEPRECATED,
+            "estimatefee with the nblocks argument is no longer supported\n"
+            "Please call estimatefee with no arguments instead.\n"
+            "\nExample:\n" +
+                HelpExampleCli("estimatefee", ""));
     }
 
-    CFeeRate feeRate = g_mempool.estimateFee(nBlocks);
-    if (feeRate == CFeeRate(Amount::zero())) {
-        return -1.0;
-    }
-
-    return ValueFromAmount(feeRate.GetFeePerK());
+    return ValueFromAmount(g_mempool.estimateFee().GetFeePerK());
 }
 
 // clang-format off

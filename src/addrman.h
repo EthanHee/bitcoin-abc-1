@@ -6,12 +6,12 @@
 #ifndef BITCOIN_ADDRMAN_H
 #define BITCOIN_ADDRMAN_H
 
-#include "netaddress.h"
-#include "protocol.h"
-#include "random.h"
-#include "sync.h"
-#include "timedata.h"
-#include "util.h"
+#include <netaddress.h>
+#include <protocol.h>
+#include <random.h>
+#include <sync.h>
+#include <timedata.h>
+#include <util.h>
 
 #include <cstdint>
 #include <map>
@@ -55,7 +55,7 @@ public:
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream &s, Operation ser_action) {
-        READWRITE(*(CAddress *)this);
+        READWRITEAS(CAddress, *this);
         READWRITE(source);
         READWRITE(nLastSuccess);
         READWRITE(nAttempts);
@@ -344,9 +344,9 @@ public:
         s << nUBuckets;
         std::map<int, int> mapUnkIds;
         int nIds = 0;
-        for (const std::pair<int, CAddrInfo> p : mapInfo) {
-            mapUnkIds[p.first] = nIds;
-            const CAddrInfo &info = p.second;
+        for (const auto &entry : mapInfo) {
+            mapUnkIds[entry.first] = nIds;
+            const CAddrInfo &info = entry.second;
             if (info.nRefCount) {
                 // this means nNew was wrong, oh ow
                 assert(nIds != nNew);
@@ -355,8 +355,8 @@ public:
             }
         }
         nIds = 0;
-        for (const std::pair<int, CAddrInfo> p : mapInfo) {
-            const CAddrInfo &info = p.second;
+        for (const auto &entry : mapInfo) {
+            const CAddrInfo &info = entry.second;
             if (info.fInTried) {
                 // this means nTried was wrong, oh ow
                 assert(nIds != nTried);
@@ -499,6 +499,7 @@ public:
     }
 
     void Clear() {
+        LOCK(cs);
         std::vector<int>().swap(vRandom);
         nKey = GetRandHash();
         for (size_t bucket = 0; bucket < ADDRMAN_NEW_BUCKET_COUNT; bucket++) {
@@ -517,6 +518,8 @@ public:
         nNew = 0;
         // Initially at 1 so that "never" is strictly worse.
         nLastGood = 1;
+        mapInfo.clear();
+        mapAddr.clear();
     }
 
     CAddrMan() { Clear(); }

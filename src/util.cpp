@@ -4,17 +4,24 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #if defined(HAVE_CONFIG_H)
-#include "config/bitcoin-config.h"
+#include <config/bitcoin-config.h>
 #endif
 
-#include "util.h"
+#include <util.h>
 
-#include "chainparamsbase.h"
-#include "fs.h"
-#include "random.h"
-#include "serialize.h"
-#include "utilstrencodings.h"
-#include "utiltime.h"
+#include <chainparamsbase.h>
+#include <fs.h>
+#include <random.h>
+#include <serialize.h>
+#include <utilstrencodings.h>
+#include <utiltime.h>
+
+#include <boost/interprocess/sync/file_lock.hpp>
+#include <boost/program_options/detail/config_file.hpp>
+#include <boost/thread.hpp>
+
+#include <openssl/conf.h>
+#include <openssl/rand.h>
 
 #include <cstdarg>
 
@@ -76,12 +83,6 @@
 #include <malloc.h>
 #endif
 
-#include <boost/program_options/detail/config_file.hpp>
-#include <boost/thread.hpp>
-
-#include <openssl/conf.h>
-#include <openssl/rand.h>
-
 // Application startup time (used for uptime calculation)
 const int64_t nStartupTime = GetTime();
 
@@ -93,26 +94,22 @@ ArgsManager gArgs;
 CTranslationInterface translationInterface;
 
 /** Init OpenSSL library multithreading support */
-static CCriticalSection **ppmutexOpenSSL;
+static std::unique_ptr<CCriticalSection[]> ppmutexOpenSSL;
 void locking_callback(int mode, int i, const char *file,
                       int line) NO_THREAD_SAFETY_ANALYSIS {
     if (mode & CRYPTO_LOCK) {
-        ENTER_CRITICAL_SECTION(*ppmutexOpenSSL[i]);
+        ENTER_CRITICAL_SECTION(ppmutexOpenSSL[i]);
     } else {
-        LEAVE_CRITICAL_SECTION(*ppmutexOpenSSL[i]);
+        LEAVE_CRITICAL_SECTION(ppmutexOpenSSL[i]);
     }
 }
 
-// Init
+// Singleton for wrapping OpenSSL setup/teardown.
 class CInit {
 public:
     CInit() {
         // Init OpenSSL library multithreading support.
-        ppmutexOpenSSL = (CCriticalSection **)OPENSSL_malloc(
-            CRYPTO_num_locks() * sizeof(CCriticalSection *));
-        for (int i = 0; i < CRYPTO_num_locks(); i++) {
-            ppmutexOpenSSL[i] = new CCriticalSection();
-        }
+        ppmutexOpenSSL.reset(new CCriticalSection[CRYPTO_num_locks()]);
         CRYPTO_set_locking_callback(locking_callback);
 
         // OpenSSL can optionally load a config file which lists optional
@@ -137,12 +134,73 @@ public:
         RAND_cleanup();
         // Shutdown OpenSSL library multithreading support.
         CRYPTO_set_locking_callback(nullptr);
-        for (int i = 0; i < CRYPTO_num_locks(); i++) {
-            delete ppmutexOpenSSL[i];
-        }
-        OPENSSL_free(ppmutexOpenSSL);
+        // Clear the set of locks now to maintain symmetry with the constructor.
+        ppmutexOpenSSL.reset();
     }
 } instance_of_cinit;
+
+/**
+ * A map that contains all the currently held directory locks. After successful
+ * locking, these will be held here until the global destructor cleans them up
+ * and thus automatically unlocks them, or ReleaseDirectoryLocks is called.
+ */
+static std::map<std::string, std::unique_ptr<boost::interprocess::file_lock>>
+    dir_locks;
+/** Mutex to protect dir_locks. */
+static std::mutex cs_dir_locks;
+
+bool LockDirectory(const fs::path &directory, const std::string lockfile_name,
+                   bool probe_only) {
+    std::lock_guard<std::mutex> ulock(cs_dir_locks);
+    fs::path pathLockFile = directory / lockfile_name;
+
+    // If a lock for this directory already exists in the map, don't try to
+    // re-lock it
+    if (dir_locks.count(pathLockFile.string())) {
+        return true;
+    }
+
+    // Create empty lock file if it doesn't exist.
+    FILE *file = fsbridge::fopen(pathLockFile, "a");
+    if (file) {
+        fclose(file);
+    }
+
+    try {
+        auto lock = std::make_unique<boost::interprocess::file_lock>(
+            pathLockFile.string().c_str());
+        if (!lock->try_lock()) {
+            return false;
+        }
+        if (!probe_only) {
+            // Lock successful and we're not just probing, put it into the map
+            dir_locks.emplace(pathLockFile.string(), std::move(lock));
+        }
+    } catch (const boost::interprocess::interprocess_exception &e) {
+        return error("Error while attempting to lock directory %s: %s",
+                     directory.string(), e.what());
+    }
+    return true;
+}
+
+void ReleaseDirectoryLocks() {
+    std::lock_guard<std::mutex> ulock(cs_dir_locks);
+    dir_locks.clear();
+}
+
+bool DirIsWritable(const fs::path &directory) {
+    fs::path tmpFile = directory / fs::unique_path();
+
+    FILE *file = fsbridge::fopen(tmpFile, "a");
+    if (!file) {
+        return false;
+    }
+
+    fclose(file);
+    remove(tmpFile);
+
+    return true;
+}
 
 /**
  * Interpret a string argument as a boolean.
@@ -617,9 +675,42 @@ fs::path GetDefaultDataDir() {
 #endif
 }
 
+static fs::path g_blocks_path_cached;
+static fs::path g_blocks_path_cache_net_specific;
 static fs::path pathCached;
 static fs::path pathCachedNetSpecific;
 static CCriticalSection csPathCached;
+
+const fs::path &GetBlocksDir(bool fNetSpecific) {
+
+    LOCK(csPathCached);
+
+    fs::path &path =
+        fNetSpecific ? g_blocks_path_cache_net_specific : g_blocks_path_cached;
+
+    // This can be called during exceptions by LogPrintf(), so we cache the
+    // value so we don't have to do memory allocations after that.
+    if (!path.empty()) {
+        return path;
+    }
+
+    if (gArgs.IsArgSet("-blocksdir")) {
+        path = fs::system_complete(gArgs.GetArg("-blocksdir", ""));
+        if (!fs::is_directory(path)) {
+            path = "";
+            return path;
+        }
+    } else {
+        path = GetDataDir(false);
+    }
+    if (fNetSpecific) {
+        path /= BaseParams().DataDir();
+    }
+
+    path /= "blocks";
+    fs::create_directories(path);
+    return path;
+}
 
 const fs::path &GetDataDir(bool fNetSpecific) {
     LOCK(csPathCached);
@@ -659,6 +750,8 @@ void ClearDatadirCache() {
 
     pathCached = fs::path();
     pathCachedNetSpecific = fs::path();
+    g_blocks_path_cached = fs::path();
+    g_blocks_path_cache_net_specific = fs::path();
 }
 
 fs::path GetblocktemplatelightDataDir()

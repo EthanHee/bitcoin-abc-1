@@ -14,23 +14,22 @@
         },
         "autopep8": {
             "type": "autopep8",
+            "version": ">=1.3.4",
             "include": "(\\.py$)"
         },
         "flake8": {
             "type": "flake8",
             "include": "(\\.py$)",
             "flags": [
-                "--select=F401"
+                "--select=F401,F403,F405"
             ]
         },
         "lint-format-strings": {
-            "type": "script-and-regex",
+            "type": "lint-format-strings",
             "include": "(^src/.*\\.(h|c|cpp)$)",
             "exclude": [
                 "(^src/(secp256k1|univalue|leveldb)/)"
-            ],
-            "script-and-regex.script": "test/lint/lint-format-strings.sh",
-            "script-and-regex.regex": "/^(?P<file>.+): (?P<message>.+:.+)$/m"
+            ]
         },
         "check-doc": {
             "type": "check-doc",
@@ -39,6 +38,28 @@
         "lint-tests": {
             "type": "lint-tests",
             "include": "(^src/(rpc/|wallet/)?test/.*\\.(cpp)$)"
+        },
+        "lint-python-format": {
+            "type": "lint-python-format",
+            "include": "(\\.py$)",
+            "exclude": [
+                "(^test/lint/lint-python-format\\.py$)"
+            ]
+        },
+        "phpcs": {
+            "type": "phpcs",
+            "include": "(\\.php$)",
+            "exclude": [
+                "(^arcanist/__phutil_library_.+\\.php$)"
+            ],
+            "phpcs.standard": "arcanist/linter/phpcs_ruleset.xml"
+        },
+        "lint-locale-dependence": {
+            "type": "lint-locale-dependence",
+            "include": "(^src/.*\\.(h|cpp)$)",
+            "exclude": [
+                "(^src/(crypto/ctaes/|leveldb/|secp256k1/|seeder/|tinyformat.h|univalue/))"
+            ]
         }
     }
 }

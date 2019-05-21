@@ -5,7 +5,7 @@
 #ifndef BITCOIN_QT_COINCONTROLDIALOG_H
 #define BITCOIN_QT_COINCONTROLDIALOG_H
 
-#include "amount.h"
+#include <amount.h>
 
 #include <QAbstractButton>
 #include <QAction>
@@ -53,7 +53,7 @@ public:
     static void updateLabels(WalletModel *, QDialog *);
 
     static QList<Amount> payAmounts;
-    static CCoinControl *coinControl;
+    static CCoinControl *coinControl();
     static bool fSubtractFeeFromAmount;
 
 private:

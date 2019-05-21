@@ -4,7 +4,11 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import *
+from test_framework.util import (
+    assert_equal,
+    assert_greater_than,
+    assert_raises_rpc_error,
+)
 
 
 class ImportMultiTest (BitcoinTestFramework):
@@ -241,7 +245,7 @@ class ImportMultiTest (BitcoinTestFramework):
         sig_address_3 = self.nodes[0].validateaddress(
             self.nodes[0].getnewaddress())
         multi_sig_script = self.nodes[0].createmultisig(
-            2, [sig_address_1['address'], sig_address_2['address'], sig_address_3['pubkey']])
+            2, [sig_address_1['pubkey'], sig_address_2['pubkey'], sig_address_3['pubkey']])
         self.nodes[1].generate(100)
         transactionid = self.nodes[1].sendtoaddress(
             multi_sig_script['address'], 10.00)
@@ -275,7 +279,7 @@ class ImportMultiTest (BitcoinTestFramework):
         sig_address_3 = self.nodes[0].validateaddress(
             self.nodes[0].getnewaddress())
         multi_sig_script = self.nodes[0].createmultisig(
-            2, [sig_address_1['address'], sig_address_2['address'], sig_address_3['pubkey']])
+            2, [sig_address_1['pubkey'], sig_address_2['pubkey'], sig_address_3['pubkey']])
         self.nodes[1].generate(100)
         transactionid = self.nodes[1].sendtoaddress(
             multi_sig_script['address'], 10.00)
@@ -309,7 +313,7 @@ class ImportMultiTest (BitcoinTestFramework):
         sig_address_3 = self.nodes[0].validateaddress(
             self.nodes[0].getnewaddress())
         multi_sig_script = self.nodes[0].createmultisig(
-            2, [sig_address_1['address'], sig_address_2['address'], sig_address_3['pubkey']])
+            2, [sig_address_1['pubkey'], sig_address_2['pubkey'], sig_address_3['pubkey']])
         self.nodes[1].generate(100)
         transactionid = self.nodes[1].sendtoaddress(
             multi_sig_script['address'], 10.00)
@@ -345,7 +349,7 @@ class ImportMultiTest (BitcoinTestFramework):
         sig_address_3 = self.nodes[0].validateaddress(
             self.nodes[0].getnewaddress())
         multi_sig_script = self.nodes[0].createmultisig(
-            2, [sig_address_1['address'], sig_address_2['address'], sig_address_3['pubkey']])
+            2, [sig_address_1['pubkey'], sig_address_2['pubkey'], sig_address_3['pubkey']])
         self.nodes[1].generate(100)
         transactionid = self.nodes[1].sendtoaddress(
             multi_sig_script['address'], 10.00)

@@ -3,11 +3,11 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "merkleblock.h"
+#include <merkleblock.h>
 
-#include "consensus/consensus.h"
-#include "hash.h"
-#include "utilstrencodings.h"
+#include <consensus/consensus.h>
+#include <hash.h>
+#include <utilstrencodings.h>
 
 CMerkleBlock::CMerkleBlock(const CBlock &block, CBloomFilter &filter) {
     header = block.GetBlockHeader();
@@ -54,6 +54,10 @@ CMerkleBlock::CMerkleBlock(const CBlock &block, const std::set<TxId> &txids) {
 
 uint256 CPartialMerkleTree::CalcHash(int height, unsigned int pos,
                                      const std::vector<uint256> &vTxid) {
+    // we can never have zero txs in a merkle block, we always need the
+    // coinbase tx if we do not have this assert, we can hit a memory
+    // access violation when indexing into vTxid
+    assert(vTxid.size() != 0);
     if (height == 0) {
         // hash at height 0 is the txids themself.
         return vTxid[pos];
@@ -62,7 +66,7 @@ uint256 CPartialMerkleTree::CalcHash(int height, unsigned int pos,
     // Calculate left hash.
     uint256 left = CalcHash(height - 1, pos * 2, vTxid), right;
     // Calculate right hash if not beyond the end of the array - copy left hash
-    // otherwise1.
+    // otherwise.
     if (pos * 2 + 1 < CalcTreeWidth(height - 1)) {
         right = CalcHash(height - 1, pos * 2 + 1, vTxid);
     } else {

@@ -2,24 +2,24 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "rpc/server.h"
+#include <rpc/server.h>
 
-#include "chainparams.h"
-#include "clientversion.h"
-#include "config.h"
-#include "net.h"
-#include "net_processing.h"
-#include "netbase.h"
-#include "policy/policy.h"
-#include "protocol.h"
-#include "sync.h"
-#include "timedata.h"
-#include "ui_interface.h"
-#include "util.h"
-#include "utilstrencodings.h"
-#include "validation.h"
-#include "version.h"
-#include "warnings.h"
+#include <chainparams.h>
+#include <clientversion.h>
+#include <config.h>
+#include <net.h>
+#include <net_processing.h>
+#include <netbase.h>
+#include <policy/policy.h>
+#include <rpc/protocol.h>
+#include <sync.h>
+#include <timedata.h>
+#include <ui_interface.h>
+#include <util.h>
+#include <utilstrencodings.h>
+#include <validation.h>
+#include <version.h>
+#include <warnings.h>
 
 #include <univalue.h>
 
@@ -385,7 +385,7 @@ static UniValue getaddednodeinfo(const Config &config,
 
     std::vector<AddedNodeInfo> vInfo = g_connman->GetAddedNodeInfo();
 
-    if (request.params.size() == 1) {
+    if (request.params.size() == 1 && !request.params[0].isNull()) {
         bool found = false;
         for (const AddedNodeInfo &info : vInfo) {
             if (info.strAddedNode == request.params[0].get_str()) {
@@ -563,8 +563,8 @@ static UniValue getnetworkinfo(const Config &config,
             "  }\n"
             "  ,...\n"
             "  ]\n"
-            "  \"warnings\": \"...\"                    "
-            "(string) any network warnings\n"
+            "  \"warnings\": \"...\"                    (string) any network "
+            "and blockchain warnings\n"
             "}\n"
             "\nExamples:\n" +
             HelpExampleCli("getnetworkinfo", "") +
@@ -717,10 +717,10 @@ static UniValue listbanned(const Config &config,
     g_connman->GetBanned(banMap);
 
     UniValue bannedAddresses(UniValue::VARR);
-    for (banmap_t::iterator it = banMap.begin(); it != banMap.end(); it++) {
-        CBanEntry banEntry = (*it).second;
+    for (const auto &entry : banMap) {
+        const CBanEntry &banEntry = entry.second;
         UniValue rec(UniValue::VOBJ);
-        rec.pushKV("address", (*it).first.ToString());
+        rec.pushKV("address", entry.first.ToString());
         rec.pushKV("banned_until", banEntry.nBanUntil);
         rec.pushKV("ban_created", banEntry.nCreateTime);
         rec.pushKV("ban_reason", banEntry.banReasonToString());

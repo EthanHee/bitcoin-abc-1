@@ -12,16 +12,17 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import time
 
 from .authproxy import JSONRPCException
-from .mininode import COIN, FromHex, CTransaction
+from .messages import COIN, CTransaction, FromHex
 from .util import (
     assert_equal,
     get_rpc_proxy,
+    p2p_port,
     rpc_url,
     wait_until,
-    p2p_port,
 )
 
 # For Python 3.4 compatibility
@@ -59,15 +60,24 @@ class TestNode():
             self.binary = os.getenv("BITCOIND", "bitcoind")
         else:
             self.binary = binary
+        if not os.path.isfile(self.binary):
+            raise FileNotFoundError(
+                "Binary '{}' could not be found.\nTry setting it manually:\n\tBITCOIND=<path/to/bitcoind> {}".format(self.binary, sys.argv[0]))
         self.stderr = stderr
         self.coverage_dir = coverage_dir
-        # Most callers will just need to add extra args to the standard list below. For those callers that need more flexibity, they can just set the args property directly.
+        # Most callers will just need to add extra args to the default list
+        # below.
+        # For those callers that need more flexibity, they can access the
+        # default args using the provided facilities
         self.extra_args = extra_args
-        self.args = [self.binary, "-datadir=" + self.datadir, "-server", "-keypool=1", "-discover=0", "-rest", "-logtimemicros",
-                     "-debug", "-debugexclude=libevent", "-debugexclude=leveldb", "-mocktime=" + str(mocktime), "-uacomment=" + self.name]
+        self.default_args = ["-datadir=" + self.datadir, "-server", "-keypool=1", "-discover=0", "-rest", "-logtimemicros",
+                             "-debug", "-debugexclude=libevent", "-debugexclude=leveldb", "-mocktime=" + str(mocktime), "-uacomment=" + self.name]
 
-        self.cli = TestNodeCLI(
-            os.getenv("BITCOINCLI", "bitcoin-cli"), self.datadir)
+        cli_path = os.getenv("BITCOINCLI", "bitcoin-cli")
+        if not os.path.isfile(cli_path):
+            raise FileNotFoundError(
+                "Binary '{}' could not be found.\nTry setting it manually:\n\tBITCOINCLI=<path/to/bitcoin-cli> {}".format(cli_path, sys.argv[0]))
+        self.cli = TestNodeCLI(cli_path, self.datadir)
         self.use_cli = use_cli
 
         self.running = False
@@ -76,7 +86,7 @@ class TestNode():
         self.rpc = None
         self.url = None
         self.relay_fee_cache = None
-        self.log = logging.getLogger('TestFramework.node%d' % i)
+        self.log = logging.getLogger('TestFramework.node{}'.format(i))
 
         self.p2ps = []
 
@@ -89,6 +99,22 @@ class TestNode():
             assert self.rpc_connected, "Error: No RPC connection"
             return getattr(self.rpc, name)
 
+    def clear_default_args(self):
+        self.default_args.clear()
+
+    def extend_default_args(self, args):
+        self.default_args.extend(args)
+
+    def remove_default_args(self, args):
+        for rm_arg in args:
+            # Remove all occurrences of rm_arg in self.default_args:
+            #  - if the arg is a flag (-flag), then the names must match
+            #  - if the arg is a value (-key=value) then the name must starts
+            #    with "-key=" (the '"' char is to avoid removing "-key_suffix"
+            #    arg is "-key" is the argument to remove).
+            self.default_args = [def_arg for def_arg in self.default_args
+                                 if rm_arg != def_arg and not def_arg.startswith(rm_arg + '=')]
+
     def start(self, extra_args=None, stderr=None, *args, **kwargs):
         """Start the node."""
         if extra_args is None:
@@ -96,7 +122,8 @@ class TestNode():
         if stderr is None:
             stderr = self.stderr
         self.process = subprocess.Popen(
-            self.args + extra_args, stderr=stderr, *args, **kwargs)
+            [self.binary] + self.default_args + extra_args,
+            stderr=stderr, *args, **kwargs)
         self.running = True
         self.log.debug("bitcoind started, waiting for RPC to come up")
 
@@ -106,7 +133,7 @@ class TestNode():
         poll_per_s = 4
         for _ in range(poll_per_s * self.rpc_timeout):
             assert self.process.poll(
-            ) is None, "bitcoind exited with status %i during initialization" % self.process.returncode
+            ) is None, "bitcoind exited with status {} during initialization".format(self.process.returncode)
             try:
                 self.rpc = get_rpc_proxy(rpc_url(self.datadir, self.host, self.rpc_port),
                                          self.index, timeout=self.rpc_timeout, coveragedir=self.coverage_dir)

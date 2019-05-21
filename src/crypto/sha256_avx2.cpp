@@ -1,10 +1,10 @@
 #ifdef ENABLE_AVX2
 
+#include <cstdint>
 #include <immintrin.h>
-#include <stdint.h>
 
-#include "crypto/common.h"
-#include "crypto/sha256.h"
+#include <crypto/common.h>
+#include <crypto/sha256.h>
 
 namespace sha256d64_avx2 {
 namespace {

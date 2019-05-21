@@ -11,12 +11,19 @@
 # This test takes 30 mins or more (up to 2 hours)
 # ********
 
-from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import *
-from test_framework.blocktools import mine_big_block
-
 import time
 import os
+
+from test_framework.blocktools import mine_big_block
+from test_framework.test_framework import BitcoinTestFramework
+from test_framework.util import (
+    assert_equal,
+    assert_greater_than,
+    assert_raises_rpc_error,
+    connect_nodes,
+    sync_blocks,
+)
+
 
 MIN_BLOCKS_TO_KEEP = 288
 
@@ -152,7 +159,7 @@ class PruneTest(BitcoinTestFramework):
         self.stop_node(1)
         self.start_node(1, extra_args=[
                         "-maxreceivebuffer=20000", "-blockmaxsize=5000", "-checkblocks=5",
-                        "-disablesafemode", "-noparkdeepreorg", "-maxreorgdepth=-1"])
+                        "-noparkdeepreorg", "-maxreorgdepth=-1"])
 
         height = self.nodes[1].getblockcount()
         self.log.info("Current block height: {}".format(height))
@@ -180,7 +187,7 @@ class PruneTest(BitcoinTestFramework):
         self.stop_node(1)
         self.start_node(1, extra_args=[
                         "-maxreceivebuffer=20000", "-blockmaxsize=5000", "-checkblocks=5",
-                        "-disablesafemode", "-noparkdeepreorg", "-maxreorgdepth=-1"])
+                        "-noparkdeepreorg", "-maxreorgdepth=-1"])
 
         self.log.info("Generating new longer chain of 300 more blocks")
         self.nodes[1].generate(300)

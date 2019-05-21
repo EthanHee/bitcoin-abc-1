@@ -3,29 +3,30 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #if defined(HAVE_CONFIG_H)
-#include "config/bitcoin-config.h"
+#include <config/bitcoin-config.h>
 #endif
 
-#include "base58.h"
-#include "chainparams.h"
-#include "clientversion.h"
-#include "coins.h"
-#include "consensus/consensus.h"
-#include "core_io.h"
-#include "dstencode.h"
-#include "keystore.h"
-#include "policy/policy.h"
-#include "primitives/transaction.h"
-#include "script/script.h"
-#include "script/sign.h"
-#include "univalue.h"
-#include "util.h"
-#include "utilmoneystr.h"
-#include "utilstrencodings.h"
-
-#include <cstdio>
+#include <base58.h>
+#include <chainparams.h>
+#include <clientversion.h>
+#include <coins.h>
+#include <consensus/consensus.h>
+#include <core_io.h>
+#include <dstencode.h>
+#include <keystore.h>
+#include <policy/policy.h>
+#include <primitives/transaction.h>
+#include <script/script.h>
+#include <script/sign.h>
+#include <util.h>
+#include <utilmoneystr.h>
+#include <utilstrencodings.h>
 
 #include <boost/algorithm/string.hpp>
+
+#include <univalue.h>
+
+#include <cstdio>
 
 static bool fCreateBlank;
 static std::map<std::string, UniValue> registers;
@@ -715,24 +716,17 @@ static void MutateTx(CMutableTransaction &tx, const std::string &command,
     } else if (command == "outaddr") {
         MutateTxAddOutAddr(tx, commandVal, chainParams);
     } else if (command == "outpubkey") {
-        if (!ecc) {
-            ecc.reset(new Secp256k1Init());
-        }
+        ecc.reset(new Secp256k1Init());
         MutateTxAddOutPubKey(tx, commandVal);
     } else if (command == "outmultisig") {
-        if (!ecc) {
-            ecc.reset(new Secp256k1Init());
-        }
+        ecc.reset(new Secp256k1Init());
         MutateTxAddOutMultiSig(tx, commandVal);
     } else if (command == "outscript") {
         MutateTxAddOutScript(tx, commandVal);
     } else if (command == "outdata") {
         MutateTxAddOutData(tx, commandVal);
     } else if (command == "sign") {
-        if (!ecc) {
-            ecc.reset(new Secp256k1Init());
-        }
-
+        ecc.reset(new Secp256k1Init());
         MutateTxSign(tx, commandVal);
     } else if (command == "load") {
         RegisterLoad(commandVal);

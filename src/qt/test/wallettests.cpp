@@ -1,23 +1,26 @@
-#include "wallettests.h"
+#include <qt/test/wallettests.h>
 
-#include "chainparams.h"
-#include "config.h"
-#include "dstencode.h"
-#include "qt/bitcoinamountfield.h"
-#include "qt/optionsmodel.h"
-#include "qt/overviewpage.h"
-#include "qt/platformstyle.h"
-#include "qt/qvalidatedlineedit.h"
-#include "qt/receivecoinsdialog.h"
-#include "qt/receiverequestdialog.h"
-#include "qt/recentrequeststablemodel.h"
-#include "qt/sendcoinsdialog.h"
-#include "qt/sendcoinsentry.h"
-#include "qt/transactiontablemodel.h"
-#include "qt/walletmodel.h"
-#include "test/test_bitcoin.h"
-#include "validation.h"
-#include "wallet/wallet.h"
+#include <chain.h>
+#include <chainparams.h>
+#include <config.h>
+#include <dstencode.h>
+#include <interfaces/node.h>
+#include <qt/bitcoinamountfield.h>
+#include <qt/optionsmodel.h>
+#include <qt/overviewpage.h>
+#include <qt/platformstyle.h>
+#include <qt/qvalidatedlineedit.h>
+#include <qt/receivecoinsdialog.h>
+#include <qt/receiverequestdialog.h>
+#include <qt/recentrequeststablemodel.h>
+#include <qt/sendcoinsdialog.h>
+#include <qt/sendcoinsentry.h>
+#include <qt/transactiontablemodel.h>
+#include <qt/walletmodel.h>
+#include <validation.h>
+#include <wallet/wallet.h>
+
+#include <test/test_bitcoin.h>
 
 #include <QAbstractButton>
 #include <QApplication>
@@ -131,7 +134,10 @@ void TestGUI() {
     }
     {
         LOCK(cs_main);
-        wallet.ScanForWalletTransactions(chainActive.Genesis(), nullptr, true);
+        WalletRescanReserver reserver(&wallet);
+        reserver.reserve();
+        wallet.ScanForWalletTransactions(chainActive.Genesis(), nullptr,
+                                         reserver, true);
     }
     wallet.SetBroadcastTransactions(true);
 
@@ -139,8 +145,12 @@ void TestGUI() {
     std::unique_ptr<const PlatformStyle> platformStyle(
         PlatformStyle::instantiate("other"));
     SendCoinsDialog sendCoinsDialog(platformStyle.get());
-    OptionsModel optionsModel;
-    WalletModel walletModel(platformStyle.get(), &wallet, &optionsModel);
+    auto node = interfaces::MakeNode();
+    OptionsModel optionsModel(*node);
+    vpwallets.insert(vpwallets.begin(), &wallet);
+    WalletModel walletModel(std::move(node->getWallets()[0]), *node,
+                            platformStyle.get(), &optionsModel);
+    vpwallets.erase(vpwallets.begin());
     sendCoinsDialog.setModel(&walletModel);
 
     // Send two transactions, and verify they are added to transaction list.
@@ -161,7 +171,7 @@ void TestGUI() {
     QLabel *balanceLabel = overviewPage.findChild<QLabel *>("labelBalance");
     QString balanceText = balanceLabel->text();
     int unit = walletModel.getOptionsModel()->getDisplayUnit();
-    Amount balance = walletModel.getBalance();
+    Amount balance = walletModel.wallet().getBalance();
     QString balanceComparison = BitcoinUnits::formatWithUnit(
         unit, balance, false, BitcoinUnits::separatorAlways);
     QCOMPARE(balanceText, balanceComparison);

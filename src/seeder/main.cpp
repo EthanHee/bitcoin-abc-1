@@ -1,19 +1,19 @@
-#include "bitcoin.h"
-#include "clientversion.h"
-#include "db.h"
-#include "dns.h"
-#include "logging.h"
-#include "protocol.h"
-#include "streams.h"
+#include <clientversion.h>
+#include <logging.h>
+#include <protocol.h>
+#include <seeder/bitcoin.h>
+#include <seeder/db.h>
+#include <seeder/dns.h>
+#include <streams.h>
 
 #include <algorithm>
 #include <atomic>
 #include <cinttypes>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <getopt.h>
 #include <pthread.h>
-#include <signal.h>
 
 class CDnsSeedOpts {
 public:
@@ -165,7 +165,7 @@ public:
 };
 
 extern "C" {
-#include "dns.h"
+#include <seeder/dns.h>
 }
 
 CAddrDb db;
@@ -489,7 +489,7 @@ int main(int argc, char **argv) {
         CService service(LookupNumeric(opts.tor, 9050));
         if (service.IsValid()) {
             printf("Using Tor proxy at %s\n", service.ToStringIPPort().c_str());
-            SetProxy(NET_TOR, proxyType(service));
+            SetProxy(NET_ONION, proxyType(service));
         }
     }
     if (opts.ipv4_proxy) {

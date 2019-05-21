@@ -1,12 +1,14 @@
-Bitcoin ABC version 0.19.0 is now available from:
+Bitcoin ABC version 0.19.6 is now available from:
 
-  <https://download.bitcoinabc.org/0.19.0/>
+  <https://download.bitcoinabc.org/0.19.6/>
 
 This release includes the following features and fixes:
- - Support for May 2019 upgrade features, as detailed at https://github.com/bitcoincashorg/bitcoincash.org/blob/master/spec/2019-05-15-upgrade.md
-    - Schnorr signatures in OP_CHECK(DATA)SIG(VERIFY): https://github.com/bitcoincashorg/bitcoincash.org/blob/master/spec/2019-05-15-schnorr.md
-    - Segwit P2SH recovery: https://github.com/bitcoincashorg/bitcoincash.org/blob/master/spec/2019-05-15-segwit-recovery.md
- - Bump automatic replay protection to November 2019 upgrade
- - Fix bitcoin-qt crash on start for users who had previously selected minimum absolute fee.
- - Fix a regression in `getrawtransaction` output where `confirmations`, `time`, and `blocktime` were not present.
- - Fixed incorrect naming for the bitcoin-qt.desktop icon for Debian/Ubuntu distributions.
+ - Using addresses in createmultisig is now deprectated. Use `-deprecatedrpc=createmultisig` to get the old behavior.
+ - Added `savemempool` RPC command for dumping mempool to disk.
+ - Added `-blocksdir` command line option for saving block data to a different disk location (such as a higher-capacity HDD).
+ - Fixed a few related issues where quickly shutting down bitcoind after startup would result in a crash.
+ - Multiple minor node stability improvements.
+ - Fixed a small memory leak.
+ - Removed `-nodebug` option, as `-debug=0` already exists as an equivalent.
+ - Fixed a bug where `bitcoin-cli generate` would hang until completion when attempting to interrupt the process.
+   It now shuts down cleanly as expected.

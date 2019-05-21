@@ -2,11 +2,12 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "chainparams.h"
-#include "test/test_bitcoin.h"
+#include <wallet/walletdb.h>
 
-#include "wallet/wallet.h"
-#include "wallet/walletdb.h"
+#include <chainparams.h>
+#include <wallet/wallet.h>
+
+#include <test/test_bitcoin.h>
 
 #include <boost/test/unit_test.hpp>
 
@@ -37,7 +38,7 @@ static std::unique_ptr<CWalletDBWrapper> TmpDB(const fs::path &pathTemp,
 static std::unique_ptr<CWallet> LoadWallet(CWalletDB *db) {
     std::unique_ptr<CWallet> wallet(new CWallet(Params()));
     DBErrors res = db->LoadWallet(wallet.get());
-    BOOST_CHECK(res == DB_LOAD_OK);
+    BOOST_CHECK(res == DBErrors::LOAD_OK);
     return wallet;
 }
 } // namespace

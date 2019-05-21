@@ -2,13 +2,16 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "blockencodings.h"
-#include "chainparams.h"
-#include "config.h"
-#include "consensus/merkle.h"
-#include "random.h"
+#include <blockencodings.h>
 
-#include "test/test_bitcoin.h"
+#include <chainparams.h>
+#include <config.h>
+#include <consensus/merkle.h>
+#include <pow.h>
+#include <random.h>
+#include <streams.h>
+
+#include <test/test_bitcoin.h>
 
 #include <boost/test/unit_test.hpp>
 
@@ -65,6 +68,7 @@ BOOST_AUTO_TEST_CASE(SimpleRoundTripTest) {
     CBlock block(BuildBlockTestCase());
 
     pool.addUnchecked(block.vtx[2]->GetId(), entry.FromTx(*block.vtx[2]));
+    LOCK(pool.cs);
     BOOST_CHECK_EQUAL(
         pool.mapTx.find(block.vtx[2]->GetId())->GetSharedTx().use_count(),
         SHARED_TX_OFFSET + 0);
@@ -175,6 +179,7 @@ BOOST_AUTO_TEST_CASE(NonCoinbasePreforwardRTTest) {
     CBlock block(BuildBlockTestCase());
 
     pool.addUnchecked(block.vtx[2]->GetId(), entry.FromTx(*block.vtx[2]));
+    LOCK(pool.cs);
     BOOST_CHECK_EQUAL(
         pool.mapTx.find(block.vtx[2]->GetId())->GetSharedTx().use_count(),
         SHARED_TX_OFFSET + 0);
@@ -256,6 +261,7 @@ BOOST_AUTO_TEST_CASE(SufficientPreforwardRTTest) {
     CBlock block(BuildBlockTestCase());
 
     pool.addUnchecked(block.vtx[1]->GetId(), entry.FromTx(*block.vtx[1]));
+    LOCK(pool.cs);
     BOOST_CHECK_EQUAL(
         pool.mapTx.find(block.vtx[1]->GetId())->GetSharedTx().use_count(),
         SHARED_TX_OFFSET + 0);

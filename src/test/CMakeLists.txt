@@ -34,6 +34,7 @@ gen_json_header(JSON_HEADERS
 	data/base58_keys_valid.json
 	data/base58_encode_decode.json
 	data/base58_keys_invalid.json
+	data/blockfilters.json
 	data/tx_invalid.json
 	data/tx_valid.json
 	data/sighash.json
@@ -56,6 +57,7 @@ add_test_to_suite(bitcoin test_bitcoin
 	bip32_tests.cpp
 	blockcheck_tests.cpp
 	blockencodings_tests.cpp
+	blockfilter_tests.cpp
 	blockindex_tests.cpp
 	blockstatus_tests.cpp
 	bloom_tests.cpp
@@ -127,7 +129,6 @@ add_test_to_suite(bitcoin test_bitcoin
 	timedata_tests.cpp
 	transaction_tests.cpp
 	txvalidationcache_tests.cpp
-	versionbits_tests.cpp
 	uint256_tests.cpp
 	undo_tests.cpp
 	univalue_tests.cpp
@@ -140,12 +141,6 @@ add_test_to_suite(bitcoin test_bitcoin
 
 	# Tests generated from JSON
 	${JSON_HEADERS}
-)
-
-target_include_directories(test_bitcoin
-	PUBLIC
-		# To access the generated json headers.
-		${CMAKE_CURRENT_BINARY_DIR}
 )
 
 find_package(Boost 1.58 REQUIRED unit_test_framework)

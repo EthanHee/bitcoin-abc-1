@@ -4,21 +4,20 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "wallet/walletdb.h"
+#include <wallet/walletdb.h>
 
-#include "base58.h"
-#include "consensus/tx_verify.h"
-#include "consensus/validation.h"
-#include "dstencode.h"
-#include "fs.h"
-#include "protocol.h"
-#include "serialize.h"
-#include "sync.h"
-#include "util.h"
-#include "utiltime.h"
-#include "wallet/wallet.h"
+#include <base58.h>
+#include <consensus/tx_verify.h>
+#include <consensus/validation.h>
+#include <dstencode.h>
+#include <fs.h>
+#include <protocol.h>
+#include <serialize.h>
+#include <sync.h>
+#include <util.h>
+#include <utiltime.h>
+#include <wallet/wallet.h>
 
-#include <boost/thread.hpp>
 #include <boost/version.hpp>
 
 #include <atomic>
@@ -298,12 +297,12 @@ bool ReadKeyValue(CWallet *pwallet, CDataStream &ssKey, CDataStream &ssValue,
         } else if (strType == "tx") {
             TxId txid;
             ssKey >> txid;
-            CWalletTx wtx;
+            CWalletTx wtx(nullptr /* pwallet */, MakeTransactionRef());
             ssValue >> wtx;
             CValidationState state;
             bool isValid = wtx.IsCoinBase()
-                               ? CheckCoinbase(wtx, state)
-                               : CheckRegularTransaction(wtx, state);
+                               ? CheckCoinbase(*wtx.tx, state)
+                               : CheckRegularTransaction(*wtx.tx, state);
             if (!isValid || wtx.GetId() != txid) {
                 return false;
             }
@@ -528,14 +527,14 @@ bool CWalletDB::IsKeyType(const std::string &strType) {
 DBErrors CWalletDB::LoadWallet(CWallet *pwallet) {
     CWalletScanState wss;
     bool fNoncriticalErrors = false;
-    DBErrors result = DB_LOAD_OK;
+    DBErrors result = DBErrors::LOAD_OK;
 
     LOCK(pwallet->cs_wallet);
     try {
         int nMinVersion = 0;
         if (batch.Read((std::string) "minversion", nMinVersion)) {
             if (nMinVersion > CLIENT_VERSION) {
-                return DB_TOO_NEW;
+                return DBErrors::TOO_NEW;
             }
             pwallet->LoadMinVersion(nMinVersion);
         }
@@ -544,7 +543,7 @@ DBErrors CWalletDB::LoadWallet(CWallet *pwallet) {
         Dbc *pcursor = batch.GetCursor();
         if (!pcursor) {
             LogPrintf("Error getting wallet database cursor\n");
-            return DB_CORRUPT;
+            return DBErrors::CORRUPT;
         }
 
         while (true) {
@@ -558,7 +557,7 @@ DBErrors CWalletDB::LoadWallet(CWallet *pwallet) {
 
             if (ret != 0) {
                 LogPrintf("Error reading next record from wallet database\n");
-                return DB_CORRUPT;
+                return DBErrors::CORRUPT;
             }
 
             // Try to be tolerant of single corrupt records:
@@ -567,7 +566,7 @@ DBErrors CWalletDB::LoadWallet(CWallet *pwallet) {
                 // losing keys is considered a catastrophic error, anything else
                 // we assume the user can live with:
                 if (IsKeyType(strType) || strType == "defaultkey") {
-                    result = DB_CORRUPT;
+                    result = DBErrors::CORRUPT;
                 } else {
                     // Leave other errors alone, if we try to fix them we might
                     // make things worse. But do warn the user there is
@@ -587,16 +586,16 @@ DBErrors CWalletDB::LoadWallet(CWallet *pwallet) {
     } catch (const boost::thread_interrupted &) {
         throw;
     } catch (...) {
-        result = DB_CORRUPT;
+        result = DBErrors::CORRUPT;
     }
 
-    if (fNoncriticalErrors && result == DB_LOAD_OK) {
-        result = DB_NONCRITICAL_ERROR;
+    if (fNoncriticalErrors && result == DBErrors::LOAD_OK) {
+        result = DBErrors::NONCRITICAL_ERROR;
     }
 
     // Any wallet corruption at all: skip any rewriting or upgrading, we don't
     // want to make it worse.
-    if (result != DB_LOAD_OK) {
+    if (result != DBErrors::LOAD_OK) {
         return result;
     }
 
@@ -611,13 +610,13 @@ DBErrors CWalletDB::LoadWallet(CWallet *pwallet) {
     }
 
     for (const TxId &txid : wss.vWalletUpgrade) {
-        WriteTx(pwallet->mapWallet[txid]);
+        WriteTx(pwallet->mapWallet.at(txid));
     }
 
     // Rewrite encrypted wallets of versions 0.4.0 and 0.5.0rc:
     if (wss.fIsEncrypted &&
         (wss.nFileVersion == 40000 || wss.nFileVersion == 50000)) {
-        return DB_NEED_REWRITE;
+        return DBErrors::NEED_REWRITE;
     }
 
     if (wss.nFileVersion < CLIENT_VERSION) {
@@ -641,14 +640,13 @@ DBErrors CWalletDB::LoadWallet(CWallet *pwallet) {
 
 DBErrors CWalletDB::FindWalletTx(std::vector<TxId> &txIds,
                                  std::vector<CWalletTx> &vWtx) {
-    bool fNoncriticalErrors = false;
-    DBErrors result = DB_LOAD_OK;
+    DBErrors result = DBErrors::LOAD_OK;
 
     try {
         int nMinVersion = 0;
         if (batch.Read((std::string) "minversion", nMinVersion)) {
             if (nMinVersion > CLIENT_VERSION) {
-                return DB_TOO_NEW;
+                return DBErrors::TOO_NEW;
             }
         }
 
@@ -656,7 +654,7 @@ DBErrors CWalletDB::FindWalletTx(std::vector<TxId> &txIds,
         Dbc *pcursor = batch.GetCursor();
         if (!pcursor) {
             LogPrintf("Error getting wallet database cursor\n");
-            return DB_CORRUPT;
+            return DBErrors::CORRUPT;
         }
 
         while (true) {
@@ -670,7 +668,7 @@ DBErrors CWalletDB::FindWalletTx(std::vector<TxId> &txIds,
 
             if (ret != 0) {
                 LogPrintf("Error reading next record from wallet database\n");
-                return DB_CORRUPT;
+                return DBErrors::CORRUPT;
             }
 
             std::string strType;
@@ -679,7 +677,7 @@ DBErrors CWalletDB::FindWalletTx(std::vector<TxId> &txIds,
                 TxId txid;
                 ssKey >> txid;
 
-                CWalletTx wtx;
+                CWalletTx wtx(nullptr /* pwallet */, MakeTransactionRef());
                 ssValue >> wtx;
 
                 txIds.push_back(txid);
@@ -690,11 +688,7 @@ DBErrors CWalletDB::FindWalletTx(std::vector<TxId> &txIds,
     } catch (const boost::thread_interrupted &) {
         throw;
     } catch (...) {
-        result = DB_CORRUPT;
-    }
-
-    if (fNoncriticalErrors && result == DB_LOAD_OK) {
-        result = DB_NONCRITICAL_ERROR;
+        result = DBErrors::CORRUPT;
     }
 
     return result;
@@ -706,7 +700,7 @@ DBErrors CWalletDB::ZapSelectTx(std::vector<TxId> &txIdsIn,
     std::vector<TxId> txIds;
     std::vector<CWalletTx> vWtx;
     DBErrors err = FindWalletTx(txIds, vWtx);
-    if (err != DB_LOAD_OK) {
+    if (err != DBErrors::LOAD_OK) {
         return err;
     }
 
@@ -737,27 +731,27 @@ DBErrors CWalletDB::ZapSelectTx(std::vector<TxId> &txIdsIn,
     }
 
     if (delerror) {
-        return DB_CORRUPT;
+        return DBErrors::CORRUPT;
     }
-    return DB_LOAD_OK;
+    return DBErrors::LOAD_OK;
 }
 
 DBErrors CWalletDB::ZapWalletTx(std::vector<CWalletTx> &vWtx) {
     // Build list of wallet TXs.
     std::vector<TxId> txIds;
     DBErrors err = FindWalletTx(txIds, vWtx);
-    if (err != DB_LOAD_OK) {
+    if (err != DBErrors::LOAD_OK) {
         return err;
     }
 
     // Erase each wallet TX.
     for (const TxId &txid : txIds) {
         if (!EraseTx(txid)) {
-            return DB_CORRUPT;
+            return DBErrors::CORRUPT;
         }
     }
 
-    return DB_LOAD_OK;
+    return DBErrors::LOAD_OK;
 }
 
 void MaybeCompactWalletDB() {

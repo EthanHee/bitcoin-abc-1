@@ -5,7 +5,7 @@
 #ifndef BITCOIN_SCHEDULER_H
 #define BITCOIN_SCHEDULER_H
 
-#include "sync.h"
+#include <sync.h>
 
 //
 // NOTE:
@@ -114,6 +114,8 @@ public:
     // until queue is empty
     // Must be called after the CScheduler has no remaining processing threads!
     void EmptyQueue();
+
+    size_t CallbacksPending();
 };
 
 #endif

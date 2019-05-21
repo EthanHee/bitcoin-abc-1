@@ -8,19 +8,20 @@
 #define BITCOIN_VALIDATION_H
 
 #if defined(HAVE_CONFIG_H)
-#include "config/bitcoin-config.h"
+#include <config/bitcoin-config.h>
 #endif
 
-#include "amount.h"
-#include "blockfileinfo.h"
-#include "coins.h"
-#include "consensus/consensus.h"
-#include "diskblockpos.h"
-#include "fs.h"
-#include "protocol.h" // For CMessageHeader::MessageMagic
-#include "script/script_error.h"
-#include "sync.h"
-#include "versionbits.h"
+#include <amount.h>
+#include <blockfileinfo.h>
+#include <coins.h>
+#include <consensus/consensus.h>
+#include <consensus/params.h>
+#include <diskblockpos.h>
+#include <fs.h>
+#include <protocol.h> // For CMessageHeader::MessageMagic
+#include <script/script_error.h>
+#include <sync.h>
+#include <versionbits.h>
 
 #include <algorithm>
 #include <atomic>
@@ -32,10 +33,13 @@
 #include <utility>
 #include <vector>
 
+class arith_uint256;
+
 class CBlockIndex;
 class CBlockTreeDB;
 class CBloomFilter;
 class CChainParams;
+class CChain;
 class CCoinsViewDB;
 class CConnman;
 class CInv;
@@ -206,11 +210,12 @@ static const int64_t DEFAULT_MIN_FINALIZATION_DELAY = 2 * 60 * 60;
 extern CScript COINBASE_FLAGS;
 extern CCriticalSection cs_main;
 extern CTxMemPool g_mempool;
+extern std::atomic_bool g_is_mempool_loaded;
 extern uint64_t nLastBlockTx;
 extern uint64_t nLastBlockSize;
 extern const std::string strMessageMagic;
-extern CWaitableCriticalSection g_best_block_mutex;
-extern CConditionVariable g_best_block_cv;
+extern Mutex g_best_block_mutex;
+extern std::condition_variable g_best_block_cv;
 extern uint256 g_best_block;
 extern std::atomic_bool fImporting;
 extern std::atomic_bool fReindex;
@@ -346,7 +351,7 @@ bool ProcessNewBlockHeaders(const Config &config,
 /**
  * Check whether enough disk space is available for an incoming block.
  */
-bool CheckDiskSpace(uint64_t nAdditionalBytes = 0);
+bool CheckDiskSpace(uint64_t nAdditionalBytes = 0, bool blocks_dir = false);
 
 /**
  * Open a block file (blk?????.dat).
@@ -401,7 +406,8 @@ bool IsInitialBlockDownload();
  * Retrieve a transaction (from memory pool, or from disk, if possible).
  */
 bool GetTransaction(const Config &config, const TxId &txid, CTransactionRef &tx,
-                    uint256 &hashBlock, bool fAllowSlow = false);
+                    uint256 &hashBlock, bool fAllowSlow = false,
+                    CBlockIndex *blockIndex = nullptr);
 
 /**
  * Find the best known block, and make it the active tip of the block chain.
@@ -421,7 +427,13 @@ Amount GetBlockSubsidy(int nHeight, const Consensus::Params &consensusParams);
  * Guess verification progress (as a fraction between 0.0=genesis and
  * 1.0=current tip).
  */
-double GuessVerificationProgress(const ChainTxData &data, CBlockIndex *pindex);
+double GuessVerificationProgress(const ChainTxData &data,
+                                 const CBlockIndex *pindex);
+
+/**
+ * Calculate the amount of disk space the block & undo files currently use.
+ */
+uint64_t CalculateCurrentUsage();
 
 /**
  * Mark one block file as pruned.
@@ -433,14 +445,12 @@ void PruneOneBlockFile(const int fileNumber);
  */
 void UnlinkPrunedFiles(const std::set<int> &setFilesToPrune);
 
-/** Create a new block index entry for a given block hash */
-CBlockIndex *InsertBlockIndex(uint256 hash);
 /** Flush all state, indexes and buffers to disk. */
 void FlushStateToDisk();
 /** Prune block files and flush state to disk. */
 void PruneAndFlush();
 /** Prune block files up to a given height */
-void PruneBlockFilesManual(int nPruneUpToHeight);
+void PruneBlockFilesManual(int nManualPruneHeight);
 
 /**
  * (try to) add transaction to memory pool
@@ -660,7 +670,7 @@ const CBlockIndex *GetFinalizedBlock();
 bool IsBlockFinalized(const CBlockIndex *pindex);
 
 /** The currently-connected chain of blocks (protected by cs_main). */
-extern CChain chainActive;
+extern CChain &chainActive;
 
 /**
  * Global variable that points to the coins database (protected by cs_main)
@@ -684,8 +694,6 @@ extern std::unique_ptr<CBlockTreeDB> pblocktree;
  * This is also true for mempool checks.
  */
 int GetSpendHeight(const CCoinsViewCache &inputs);
-
-extern VersionBitsCache versionbitscache;
 
 /**
  * Determine what nVersion a new block should use.
@@ -712,7 +720,7 @@ static const unsigned int REJECT_AGAINST_FINALIZED = 0x103;
 CBlockFileInfo *GetBlockFileInfo(size_t n);
 
 /** Dump the mempool to disk. */
-void DumpMempool();
+bool DumpMempool();
 
 /** Load the mempool from disk. */
 bool LoadMempool(const Config &config);

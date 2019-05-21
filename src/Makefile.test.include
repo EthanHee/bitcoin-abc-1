@@ -15,6 +15,7 @@ JSON_TEST_FILES = \
   test/data/base58_keys_valid.json \
   test/data/base58_encode_decode.json \
   test/data/base58_keys_invalid.json \
+  test/data/blockfilters.json \
   test/data/tx_invalid.json \
   test/data/tx_valid.json \
   test/data/sighash.json
@@ -38,6 +39,7 @@ BITCOIN_TESTS =\
   test/bip32_tests.cpp \
   test/blockcheck_tests.cpp \
   test/blockencodings_tests.cpp \
+  test/blockfilter_tests.cpp \
   test/blockindex_tests.cpp \
   test/blockstatus_tests.cpp \
   test/bloom_tests.cpp \
@@ -114,7 +116,6 @@ BITCOIN_TESTS =\
   test/timedata_tests.cpp \
   test/transaction_tests.cpp \
   test/txvalidationcache_tests.cpp \
-  test/versionbits_tests.cpp \
   test/uint256_tests.cpp \
   test/undo_tests.cpp \
   test/univalue_tests.cpp \
@@ -134,7 +135,7 @@ BITCOIN_TESTS += \
 endif
 
 test_test_bitcoin_SOURCES = $(BITCOIN_TESTS) $(JSON_TEST_FILES) $(RAW_TEST_FILES)
-test_test_bitcoin_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) -I$(builddir)/test/ $(TESTDEFS) $(EVENT_CFLAGS)
+test_test_bitcoin_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(TESTDEFS) $(EVENT_CFLAGS)
 test_test_bitcoin_LDADD =
 if ENABLE_WALLET
 test_test_bitcoin_LDADD += $(LIBBITCOIN_WALLET)

@@ -2,28 +2,28 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "test_bitcoin.h"
+#include <test/test_bitcoin.h>
 
-#include "chainparams.h"
-#include "config.h"
-#include "consensus/consensus.h"
-#include "consensus/validation.h"
-#include "crypto/sha256.h"
-#include "fs.h"
-#include "key.h"
-#include "logging.h"
-#include "miner.h"
-#include "net_processing.h"
-#include "pubkey.h"
-#include "random.h"
-#include "rpc/register.h"
-#include "rpc/server.h"
-#include "script/scriptcache.h"
-#include "script/sigcache.h"
-#include "txdb.h"
-#include "txmempool.h"
-#include "ui_interface.h"
-#include "validation.h"
+#include <chainparams.h>
+#include <config.h>
+#include <consensus/consensus.h>
+#include <consensus/validation.h>
+#include <crypto/sha256.h>
+#include <fs.h>
+#include <key.h>
+#include <logging.h>
+#include <miner.h>
+#include <net_processing.h>
+#include <pubkey.h>
+#include <random.h>
+#include <rpc/register.h>
+#include <rpc/server.h>
+#include <script/scriptcache.h>
+#include <script/sigcache.h>
+#include <txdb.h>
+#include <txmempool.h>
+#include <ui_interface.h>
+#include <validation.h>
 
 #include <atomic>
 #include <chrono>
@@ -101,9 +101,10 @@ TestingSetup::TestingSetup(const std::string &chainName)
     fs::create_directories(pathTemp);
     gArgs.ForceSetArg("-datadir", pathTemp.string());
 
-    // Note that because we don't bother running a scheduler thread here,
-    // callbacks via CValidationInterface are unreliable, but that's OK,
-    // our unit tests aren't testing multiple parts of the code at once.
+    // We have to run a scheduler thread to prevent ActivateBestChain
+    // from blocking due to queue overrun.
+    threadGroup.create_thread(
+        boost::bind(&CScheduler::serviceQueue, &scheduler));
     GetMainSignals().RegisterBackgroundSignalScheduler(scheduler);
 
     g_mempool.setSanityCheck(1.0);
@@ -183,7 +184,10 @@ CBlock TestChain100Setup::CreateAndProcessBlock(
 
     // IncrementExtraNonce creates a valid coinbase and merkleRoot
     unsigned int extraNonce = 0;
-    IncrementExtraNonce(config, &block, chainActive.Tip(), extraNonce);
+    {
+        LOCK(cs_main);
+        IncrementExtraNonce(config, &block, chainActive.Tip(), extraNonce);
+    }
 
     while (!CheckProofOfWork(block.GetHash(), block.nBits, config)) {
         ++block.nNonce;

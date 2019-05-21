@@ -3,14 +3,14 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "sigcache.h"
+#include <script/sigcache.h>
 
-#include "cuckoocache.h"
-#include "memusage.h"
-#include "pubkey.h"
-#include "random.h"
-#include "uint256.h"
-#include "util.h"
+#include <cuckoocache.h>
+#include <memusage.h>
+#include <pubkey.h>
+#include <random.h>
+#include <uint256.h>
+#include <util.h>
 
 #include <boost/thread/shared_mutex.hpp>
 
@@ -83,7 +83,8 @@ public:
 static CSignatureCache signatureCache;
 } // namespace
 
-// To be called once in AppInit2/TestingSetup to initialize the signatureCache
+// To be called once in AppInitMain/BasicTestingSetup to initialize the
+// signatureCache.
 void InitSignatureCache() {
     // nMaxCacheSize is unsigned. If -maxsigcachesize is set to zero,
     // setup_bytes creates the minimum possible cache (2 elements).

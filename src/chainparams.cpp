@@ -4,16 +4,15 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "chainparams.h"
-#include "consensus/merkle.h"
+#include <chainparams.h>
 
-#include "tinyformat.h"
-#include "util.h"
-#include "utilstrencodings.h"
+#include <chainparamsseeds.h>
+#include <consensus/merkle.h>
+#include <tinyformat.h>
+#include <util.h>
+#include <utilstrencodings.h>
 
 #include <cassert>
-
-#include "chainparamsseeds.h"
 
 static CBlock CreateGenesisBlock(const char *pszTimestamp,
                                  const CScript &genesisOutputScript,
@@ -115,12 +114,12 @@ public:
 
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S(
-            "000000000000000000000000000000000000000000def4345931d03e6e4faf78");
+            "000000000000000000000000000000000000000000eafdfa9271c11ceae5513a");
 
         // By default assume that the signatures in ancestors of this block are
         // valid.
         consensus.defaultAssumeValid = uint256S(
-            "000000000000000003aadeae9dee37b8cb4838a866dae19b54854a0f039b03e0");
+            "000000000000000001b4b8e36aec7d4f9671a47872cb9a74dc16ca398c7dcc18");
 
         // August 1, 2017 hard fork
         consensus.uahfHeight = 478558;
@@ -165,7 +164,7 @@ public:
 
         // Note that of those which support the service bits prefix, most only
         // support a subset of possible options. This is fine at runtime as
-        // we'll fall back to using them as a oneshot if they dont support the
+        // we'll fall back to using them as a oneshot if they don't support the
         // service bits we want, but we should get them updated to support all
         // service bits wanted by any release ASAP to avoid it where possible.
         // Bitcoin ABC seeder
@@ -235,6 +234,9 @@ public:
                 // Magnetic anomaly activation.
                 {556767, uint256S("0000000000000000004626ff6e3b936941d341c5932e"
                                   "ce4357eeccac44e6d56c")},
+                // Great wall activation.
+                {582680, uint256S("000000000000000001b4b8e36aec7d4f9671a47872cb"
+                                  "9a74dc16ca398c7dcc18")},
             }};
 
         // Data as of block
@@ -289,12 +291,12 @@ public:
 
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S(
-            "0000000000000000000000000000000000000000000000416ad051088ff75074");
+            "000000000000000000000000000000000000000000000043cb761ba833f844c5");
 
         // By default assume that the signatures in ancestors of this block are
         // valid.
         consensus.defaultAssumeValid = uint256S(
-            "000000000000030bee568d677b6b99ee7d2d00b25d1fe95df5e73b484f00c322");
+            "00000000000002cb911c0a756a24c2fe6c1a29acaede3569ce430b95d8ff012d");
 
         // August 1, 2017 hard fork
         consensus.uahfHeight = 1155875;

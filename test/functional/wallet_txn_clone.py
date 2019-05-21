@@ -5,7 +5,12 @@
 """Test the wallet accounts properly when there are cloned transactions with malleated scriptsigs."""
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import *
+from test_framework.util import (
+    assert_equal,
+    connect_nodes,
+    disconnect_nodes,
+    sync_blocks,
+)
 
 
 class TxnMallTest(BitcoinTestFramework):
@@ -78,8 +83,8 @@ class TxnMallTest(BitcoinTestFramework):
 
         # Use a different signature hash type to sign.  This creates an equivalent but malleated clone.
         # Don't send the clone anywhere yet
-        tx1_clone = self.nodes[0].signrawtransaction(
-            clone_raw, None, None, "ALL|FORKID|ANYONECANPAY")
+        tx1_clone = self.nodes[0].signrawtransactionwithwallet(
+            clone_raw, None, "ALL|FORKID|ANYONECANPAY")
         assert_equal(tx1_clone["complete"], True)
 
         # Have node0 mine a block, if requested:

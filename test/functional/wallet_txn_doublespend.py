@@ -3,9 +3,16 @@
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test the wallet accounts properly when there is a double-spend conflict."""
+from decimal import Decimal
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import *
+from test_framework.util import (
+    assert_equal,
+    connect_nodes,
+    disconnect_nodes,
+    find_output,
+    sync_blocks,
+)
 
 
 class TxnMallTest(BitcoinTestFramework):
@@ -61,7 +68,7 @@ class TxnMallTest(BitcoinTestFramework):
         outputs[node1_address] = 1240
         outputs[change_address] = 1248 - 1240 + doublespend_fee
         rawtx = self.nodes[0].createrawtransaction(inputs, outputs)
-        doublespend = self.nodes[0].signrawtransaction(rawtx)
+        doublespend = self.nodes[0].signrawtransactionwithwallet(rawtx)
         assert_equal(doublespend["complete"], True)
 
         # Create two spends using 1 50 BTC coin each

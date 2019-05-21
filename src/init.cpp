@@ -4,58 +4,49 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #if defined(HAVE_CONFIG_H)
-#include "config/bitcoin-config.h"
+#include <config/bitcoin-config.h>
 #endif
 
-#include "init.h"
+#include <init.h>
 
-#include "addrman.h"
-#include "amount.h"
-#include "chain.h"
-#include "chainparams.h"
-#include "checkpoints.h"
-#include "compat/sanity.h"
-#include "config.h"
-#include "consensus/validation.h"
-#include "diskblockpos.h"
-#include "fs.h"
-#include "httprpc.h"
-#include "httpserver.h"
-#include "key.h"
-#include "miner.h"
-#include "net.h"
-#include "net_processing.h"
-#include "netbase.h"
-#include "policy/policy.h"
-#include "rpc/register.h"
-#include "rpc/safemode.h"
-#include "rpc/server.h"
-#include "scheduler.h"
-#include "script/scriptcache.h"
-#include "script/sigcache.h"
-#include "script/standard.h"
-#include "timedata.h"
-#include "torcontrol.h"
-#include "txdb.h"
-#include "txmempool.h"
-#include "ui_interface.h"
-#include "util.h"
-#include "utilmoneystr.h"
-#include "validation.h"
-#include "validationinterface.h"
+#include <addrman.h>
+#include <amount.h>
+#include <chain.h>
+#include <chainparams.h>
+#include <checkpoints.h>
+#include <compat/sanity.h>
+#include <config.h>
+#include <consensus/validation.h>
+#include <diskblockpos.h>
+#include <fs.h>
+#include <httprpc.h>
+#include <httpserver.h>
+#include <key.h>
+#include <miner.h>
+#include <net.h>
+#include <net_processing.h>
+#include <netbase.h>
+#include <policy/policy.h>
+#include <rpc/register.h>
+#include <rpc/server.h>
+#include <scheduler.h>
+#include <script/scriptcache.h>
+#include <script/sigcache.h>
+#include <script/standard.h>
+#include <timedata.h>
+#include <torcontrol.h>
+#include <txdb.h>
+#include <txmempool.h>
+#include <ui_interface.h>
+#include <util.h>
+#include <utilmoneystr.h>
+#include <validation.h>
+#include <validationinterface.h>
 #ifdef ENABLE_WALLET
-#include "wallet/rpcdump.h"
+#include <wallet/rpcdump.h>
 #endif
-#include "walletinitinterface.h"
-#include "warnings.h"
-
-#include <cstdint>
-#include <cstdio>
-#include <memory>
-
-#ifndef WIN32
-#include <signal.h>
-#endif
+#include <walletinitinterface.h>
+#include <warnings.h>
 
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/replace.hpp>
@@ -65,8 +56,15 @@
 #include <boost/thread.hpp>
 
 #if ENABLE_ZMQ
-#include "zmq/zmqnotificationinterface.h"
+#include <zmq/zmqnotificationinterface.h>
 #endif
+
+#ifndef WIN32
+#include <csignal>
+#endif
+#include <cstdint>
+#include <cstdio>
+#include <memory>
 
 static const bool DEFAULT_PROXYRANDOMIZE = true;
 static const bool DEFAULT_REST_ENABLE = false;
@@ -123,16 +121,11 @@ static CZMQNotificationInterface *pzmqNotificationInterface = nullptr;
 // called to clean up database connections, and stop other threads that should
 // only be stopped after the main network-processing threads have exited.
 //
-// Note that if running -daemon the parent process returns from AppInit2 before
-// adding any threads to the threadGroup, so .join_all() returns immediately and
-// the parent exits from main().
-//
 // Shutdown for Qt is very similar, only it uses a QTimer to detect
 // fRequestShutdown getting set, and then does the normal Qt shutdown thing.
 //
 
 std::atomic<bool> fRequestShutdown(false);
-std::atomic<bool> fDumpMempoolLater(false);
 
 void StartShutdown() {
     fRequestShutdown = true;
@@ -196,10 +189,10 @@ void Shutdown() {
         return;
     }
 
-    /// Note: Shutdown() must be able to handle cases in which AppInit2() failed
-    /// part of the way, for example if the data directory was found to be
-    /// locked. Be sure that anything that writes files or flushes caches only
-    /// does this if the respective module was initialized.
+    /// Note: Shutdown() must be able to handle cases in which initialization
+    /// failed part of the way, for example if the data directory was found to
+    /// be locked. Be sure that anything that writes files or flushes caches
+    /// only does this if the respective module was initialized.
     RenameThread("bitcoin-shutoff");
     g_mempool.AddTransactionsUpdated(1);
 
@@ -228,7 +221,7 @@ void Shutdown() {
     threadGroup.interrupt_all();
     threadGroup.join_all();
 
-    if (fDumpMempoolLater &&
+    if (g_is_mempool_loaded &&
         gArgs.GetArg("-persistmempool", DEFAULT_PERSIST_MEMPOOL)) {
         DumpMempool();
     }
@@ -286,15 +279,27 @@ void Shutdown() {
 }
 
 /**
- * Signal handlers are very limited in what they are allowed to do, so:
+ * Signal handlers are very limited in what they are allowed to do.
+ * The execution context the handler is invoked in is not guaranteed,
+ * so we restrict handler operations to just touching variables:
  */
-void HandleSIGTERM(int) {
+static void HandleSIGTERM(int) {
     fRequestShutdown = true;
 }
 
-void HandleSIGHUP(int) {
+static void HandleSIGHUP(int) {
     GetLogger().m_reopen_file = true;
 }
+
+#ifndef WIN32
+static void registerSignalHandler(int signal, void (*handler)(int)) {
+    struct sigaction sa;
+    sa.sa_handler = handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(signal, &sa, NULL);
+}
+#endif
 
 void OnRPCStarted() {
     uiInterface.NotifyBlockTip.connect(&RPCNotifyBlockChange);
@@ -328,6 +333,9 @@ std::string HelpMessage(HelpMessageMode mode) {
         "-alertnotify=<cmd>",
         _("Execute command when a relevant alert is received or we see a "
           "really long fork (%s in cmd is replaced by message)"));
+    strUsage += HelpMessageOpt(
+        "-blocksdir=<dir>",
+        _("Specify blocks directory (default: <datadir>/blocks)"));
     strUsage += HelpMessageOpt("-blocknotify=<cmd>",
                                _("Execute command when the best block changes "
                                  "(%s in cmd is replaced by block hash)"));
@@ -349,7 +357,7 @@ std::string HelpMessage(HelpMessageMode mode) {
     strUsage += HelpMessageOpt(
         "-conf=<file>", strprintf(_("Specify configuration file (default: %s)"),
                                   BITCOIN_CONF_FILENAME));
-    if (mode == HMM_BITCOIND) {
+    if (mode == HelpMessageMode::BITCOIND) {
 #if HAVE_DECL_DAEMON
         strUsage += HelpMessageOpt(
             "-daemon",
@@ -663,16 +671,9 @@ std::string HelpMessage(HelpMessageMode mode) {
             "-checkpoints", strprintf("Only accept block chain matching "
                                       "built-in checkpoints (default: %d)",
                                       DEFAULT_CHECKPOINTS_ENABLED));
-        strUsage += HelpMessageOpt(
-            "-disablesafemode", strprintf("Disable safemode, override a real "
-                                          "safe mode event (default: %d)",
-                                          DEFAULT_DISABLE_SAFEMODE));
         strUsage +=
             HelpMessageOpt("-deprecatedrpc=<method>",
                            "Allows deprecated RPC method(s) to be used");
-        strUsage += HelpMessageOpt(
-            "-testsafemode",
-            strprintf("Force safe mode (default: %d)", DEFAULT_TESTSAFEMODE));
         strUsage +=
             HelpMessageOpt("-dropmessagestest=<n>",
                            "Randomly drop 1 of every <n> network messages");
@@ -724,10 +725,6 @@ std::string HelpMessage(HelpMessageMode mode) {
         strprintf(_("Exclude debugging information for a category. Can be used "
                     "in conjunction with -debug=1 to output debug logs for all "
                     "categories except one or more specified categories.")));
-    if (showDebug) {
-        strUsage += HelpMessageOpt(
-            "-nodebug", "Turn off debugging messages, same as -debug=0");
-    }
     strUsage += HelpMessageOpt(
         "-help-debug",
         _("Show all debugging options (usage: --help -help-debug)"));
@@ -963,16 +960,16 @@ static void BlockNotifyCallback(bool initialSync,
 }
 
 static bool fHaveGenesis = false;
-static CWaitableCriticalSection cs_GenesisWait;
-static CConditionVariable condvar_GenesisWait;
+static Mutex g_genesis_wait_mutex;
+static std::condition_variable g_genesis_wait_cv;
 
 static void BlockNotifyGenesisWait(bool, const CBlockIndex *pBlockIndex) {
     if (pBlockIndex != nullptr) {
         {
-            LOCK(cs_GenesisWait);
+            LOCK(g_genesis_wait_mutex);
             fHaveGenesis = true;
         }
-        condvar_GenesisWait.notify_all();
+        g_genesis_wait_cv.notify_all();
     }
 }
 
@@ -1003,7 +1000,7 @@ void CleanupBlockRevFiles() {
     // ordered map keyed by block file index.
     LogPrintf("Removing unusable blk?????.dat and rev?????.dat files for "
               "-reindex with -prune\n");
-    fs::path blocksdir = GetDataDir() / "blocks";
+    fs::path blocksdir = GetBlocksDir();
     for (fs::directory_iterator it(blocksdir); it != fs::directory_iterator();
          it++) {
         if (is_regular_file(*it) &&
@@ -1098,18 +1095,20 @@ void ThreadImport(const Config &config, std::vector<fs::path> vImportFiles) {
         if (!ActivateBestChain(config, state)) {
             LogPrintf("Failed to connect best block");
             StartShutdown();
+            return;
         }
 
         if (gArgs.GetBoolArg("-stopafterblockimport",
                              DEFAULT_STOPAFTERBLOCKIMPORT)) {
             LogPrintf("Stopping after block import\n");
             StartShutdown();
+            return;
         }
     } // End scope of CImportingNow
     if (gArgs.GetArg("-persistmempool", DEFAULT_PERSIST_MEMPOOL)) {
         LoadMempool(config);
-        fDumpMempoolLater = !fRequestShutdown;
     }
+    g_is_mempool_loaded = !fRequestShutdown;
 }
 
 /** Sanity checks
@@ -1347,19 +1346,11 @@ bool AppInitBasicSetup() {
     }
 
     // Clean shutdown on SIGTERM
-    struct sigaction sa;
-    sa.sa_handler = HandleSIGTERM;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGTERM, &sa, nullptr);
-    sigaction(SIGINT, &sa, nullptr);
+    registerSignalHandler(SIGTERM, HandleSIGTERM);
+    registerSignalHandler(SIGINT, HandleSIGTERM);
 
     // Reopen debug.log on SIGHUP
-    struct sigaction sa_hup;
-    sa_hup.sa_handler = HandleSIGHUP;
-    sigemptyset(&sa_hup.sa_mask);
-    sa_hup.sa_flags = 0;
-    sigaction(SIGHUP, &sa_hup, nullptr);
+    registerSignalHandler(SIGHUP, HandleSIGHUP);
 
     // Ignore SIGPIPE, otherwise it will bring the daemon down if the client
     // closes unexpectedly
@@ -1376,6 +1367,12 @@ bool AppInitParameterInteraction(Config &config, RPCServer &rpcServer) {
     // Step 2: parameter interactions
 
     // also see: InitParameterInteraction()
+
+    if (!fs::is_directory(GetBlocksDir(false))) {
+        return InitError(
+            strprintf(_("Specified blocks directory \"%s\" does not exist.\n"),
+                      gArgs.GetArg("-blocksdir", "").c_str()));
+    }
 
     // if using block pruning, then disallow txindex
     if (gArgs.GetArg("-prune", 0)) {
@@ -1501,6 +1498,11 @@ bool AppInitParameterInteraction(Config &config, RPCServer &rpcServer) {
                                         chainparams.DefaultConsistencyChecks());
     fCheckpointsEnabled =
         gArgs.GetBoolArg("-checkpoints", DEFAULT_CHECKPOINTS_ENABLED);
+    if (fCheckpointsEnabled) {
+        LogPrintf("Checkpoints will be verified.\n");
+    } else {
+        LogPrintf("Skipping checkpoint verification.\n");
+    }
 
     hashAssumeValid = uint256S(
         gArgs.GetArg("-assumevalid",
@@ -1699,33 +1701,17 @@ bool AppInitParameterInteraction(Config &config, RPCServer &rpcServer) {
 }
 
 static bool LockDataDirectory(bool probeOnly) {
-    std::string strDataDir = GetDataDir().string();
-
     // Make sure only a single Bitcoin process is using the data directory.
-    fs::path pathLockFile = GetDataDir() / ".lock";
-    // empty lock file; created if it doesn't exist.
-    FILE *file = fsbridge::fopen(pathLockFile, "a");
-    if (file) {
-        fclose(file);
+    fs::path datadir = GetDataDir();
+    if (!DirIsWritable(datadir)) {
+        return InitError(strprintf(
+            _("Cannot write to data directory '%s'; check permissions."),
+            datadir.string()));
     }
-
-    try {
-        static boost::interprocess::file_lock lock(
-            pathLockFile.string().c_str());
-        if (!lock.try_lock()) {
-            return InitError(
-                strprintf(_("Cannot obtain a lock on data directory %s. %s is "
-                            "probably already running."),
-                          strDataDir, _(PACKAGE_NAME)));
-        }
-        if (probeOnly) {
-            lock.unlock();
-        }
-    } catch (const boost::interprocess::interprocess_exception &e) {
+    if (!LockDirectory(datadir, ".lock", probeOnly)) {
         return InitError(strprintf(_("Cannot obtain a lock on data directory "
-                                     "%s. %s is probably already running.") +
-                                       " %s.",
-                                   strDataDir, _(PACKAGE_NAME), e.what()));
+                                     "%s. %s is probably already running."),
+                                   datadir.string(), _(PACKAGE_NAME)));
     }
     return true;
 }
@@ -1913,7 +1899,7 @@ bool AppInitMain(Config &config,
     // -noproxy (or -proxy=0) as well as the empty string can be used to not set
     // a proxy, this is the default
     std::string proxyArg = gArgs.GetArg("-proxy", "");
-    SetLimited(NET_TOR);
+    SetLimited(NET_ONION);
     if (proxyArg != "" && proxyArg != "0") {
         CService proxyAddr;
         if (!Lookup(proxyArg.c_str(), proxyAddr, 9050, fNameLookup)) {
@@ -1929,10 +1915,10 @@ bool AppInitMain(Config &config,
 
         SetProxy(NET_IPV4, addrProxy);
         SetProxy(NET_IPV6, addrProxy);
-        SetProxy(NET_TOR, addrProxy);
+        SetProxy(NET_ONION, addrProxy);
         SetNameProxy(addrProxy);
         // by default, -proxy sets onion as reachable, unless -noonion later
-        SetLimited(NET_TOR, false);
+        SetLimited(NET_ONION, false);
     }
 
     // -onion can be used to set only a proxy for .onion, or override normal
@@ -1942,8 +1928,8 @@ bool AppInitMain(Config &config,
     // to -proxy set above, or none)
     std::string onionArg = gArgs.GetArg("-onion", "");
     if (onionArg != "") {
-        if (onionArg == "0") {   // Handle -noonion/-onion=0
-            SetLimited(NET_TOR); // set onions as unreachable
+        if (onionArg == "0") {     // Handle -noonion/-onion=0
+            SetLimited(NET_ONION); // set onions as unreachable
         } else {
             CService onionProxy;
             if (!Lookup(onionArg.c_str(), onionProxy, 9050, fNameLookup)) {
@@ -1955,8 +1941,8 @@ bool AppInitMain(Config &config,
                 return InitError(strprintf(
                     _("Invalid -onion address or hostname: '%s'"), onionArg));
             }
-            SetProxy(NET_TOR, addrOnion);
-            SetLimited(NET_TOR, false);
+            SetProxy(NET_ONION, addrOnion);
+            SetLimited(NET_ONION, false);
         }
     }
 
@@ -2038,6 +2024,8 @@ bool AppInitMain(Config &config,
 
         uiInterface.InitMessage(_("Loading block index..."));
 
+        LOCK(cs_main);
+
         nStart = GetTimeMillis();
         do {
             try {
@@ -2073,8 +2061,8 @@ bool AppInitMain(Config &config,
                 // (we're likely using a testnet datadir, or the other way
                 // around).
                 if (!mapBlockIndex.empty() &&
-                    mapBlockIndex.count(
-                        chainparams.GetConsensus().hashGenesisBlock) == 0) {
+                    !LookupBlockIndex(
+                        chainparams.GetConsensus().hashGenesisBlock)) {
                     return InitError(_("Incorrect or no genesis block found. "
                                        "Wrong datadir for network?"));
                 }
@@ -2169,21 +2157,17 @@ bool AppInitMain(Config &config,
                                   MIN_BLOCKS_TO_KEEP);
                     }
 
-                    {
-                        LOCK(cs_main);
-                        CBlockIndex *tip = chainActive.Tip();
-                        RPCNotifyBlockChange(true, tip);
-                        if (tip && tip->nTime > GetAdjustedTime() +
-                                                    MAX_FUTURE_BLOCK_TIME) {
-                            strLoadError =
-                                _("The block database contains a block which "
-                                  "appears to be from the future. This may be "
-                                  "due to your computer's date and time being "
-                                  "set incorrectly. Only rebuild the block "
-                                  "database if you are sure that your "
-                                  "computer's date and time are correct");
-                            break;
-                        }
+                    CBlockIndex *tip = chainActive.Tip();
+                    RPCNotifyBlockChange(true, tip);
+                    if (tip && tip->nTime >
+                                   GetAdjustedTime() + MAX_FUTURE_BLOCK_TIME) {
+                        strLoadError = _(
+                            "The block database contains a block which appears "
+                            "to be from the future. This may be due to your "
+                            "computer's date and time being set incorrectly. "
+                            "Only rebuild the block database if you are sure "
+                            "that your computer's date and time are correct");
+                        break;
                     }
 
                     if (!CVerifyDB().VerifyDB(
@@ -2262,7 +2246,14 @@ bool AppInitMain(Config &config,
     }
 
     // Step 10: import blocks
-    if (!CheckDiskSpace()) {
+    if (!CheckDiskSpace(/* additional_bytes */ 0, /* blocks_dir */ false)) {
+        InitError(
+            strprintf(_("Error: Disk space is low for %s"), GetDataDir()));
+        return false;
+    }
+    if (!CheckDiskSpace(/* additional_bytes */ 0, /* blocks_dir */ true)) {
+        InitError(
+            strprintf(_("Error: Disk space is low for %s"), GetBlocksDir()));
         return false;
     }
 
@@ -2289,14 +2280,18 @@ bool AppInitMain(Config &config,
 
     // Wait for genesis block to be processed
     {
-        WAIT_LOCK(cs_GenesisWait, lock);
+        WAIT_LOCK(g_genesis_wait_mutex, lock);
         // We previously could hang here if StartShutdown() is called prior to
         // ThreadImport getting started, so instead we just wait on a timer to
         // check ShutdownRequested() regularly.
         while (!fHaveGenesis && !ShutdownRequested()) {
-            condvar_GenesisWait.wait_for(lock, std::chrono::milliseconds(500));
+            g_genesis_wait_cv.wait_for(lock, std::chrono::milliseconds(500));
         }
         uiInterface.NotifyBlockTip.disconnect(BlockNotifyGenesisWait);
+    }
+
+    if (ShutdownRequested()) {
+        return false;
     }
 
     // Step 11: start node
@@ -2392,5 +2387,5 @@ bool AppInitMain(Config &config,
 
     g_wallet_init_interface->Start(scheduler);
 
-    return !fRequestShutdown;
+    return true;
 }

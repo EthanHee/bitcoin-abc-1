@@ -7,12 +7,15 @@
 # Test PrioritiseTransaction code
 #
 
-from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import *
-from test_framework.mininode import COIN
+from test_framework.blocktools import (
+    create_confirmed_utxos,
+    send_big_transactions,
+)
 # FIXME: review how this test needs to be adapted w.r.t _LEGACY_MAX_BLOCK_SIZE
 from test_framework.cdefs import LEGACY_MAX_BLOCK_SIZE
-from test_framework.blocktools import send_big_transactions, create_confirmed_utxos
+from test_framework.messages import COIN
+from test_framework.test_framework import BitcoinTestFramework
+from test_framework.util import assert_equal, assert_raises_rpc_error
 
 
 class PrioritiseTransactionTest(BitcoinTestFramework):
@@ -26,8 +29,6 @@ class PrioritiseTransactionTest(BitcoinTestFramework):
 
         utxo_count = 90
         utxos = create_confirmed_utxos(self.nodes[0], utxo_count)
-        # our transactions are smaller than 100kb
-        base_fee = self.relayfee * 100
         txids = []
 
         # Create 3 batches of transactions at 3 different fee rate levels
@@ -119,7 +120,7 @@ class PrioritiseTransactionTest(BitcoinTestFramework):
         inputs.append({"txid": utxo["txid"], "vout": utxo["vout"]})
         outputs[self.nodes[0].getnewaddress()] = utxo["amount"] - self.relayfee
         raw_tx = self.nodes[0].createrawtransaction(inputs, outputs)
-        tx_hex = self.nodes[0].signrawtransaction(raw_tx)["hex"]
+        tx_hex = self.nodes[0].signrawtransactionwithwallet(raw_tx)["hex"]
         txid = self.nodes[0].sendrawtransaction(tx_hex)
 
         # A tx that spends an in-mempool tx has 0 priority, so we can use it to
@@ -130,7 +131,7 @@ class PrioritiseTransactionTest(BitcoinTestFramework):
         outputs = {}
         outputs[self.nodes[0].getnewaddress()] = utxo["amount"] - self.relayfee
         raw_tx2 = self.nodes[0].createrawtransaction(inputs, outputs)
-        tx2_hex = self.nodes[0].signrawtransaction(raw_tx2)["hex"]
+        tx2_hex = self.nodes[0].signrawtransactionwithwallet(raw_tx2)["hex"]
         tx2_id = self.nodes[0].decoderawtransaction(tx2_hex)["txid"]
 
         # This will raise an exception due to min relay fee not being met

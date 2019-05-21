@@ -2,17 +2,13 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "torcontrol.h"
-#include "crypto/hmac_sha256.h"
-#include "net.h"
-#include "netbase.h"
-#include "util.h"
-#include "utilstrencodings.h"
+#include <torcontrol.h>
 
-#include <cstdlib>
-#include <deque>
-#include <set>
-#include <vector>
+#include <crypto/hmac_sha256.h>
+#include <net.h>
+#include <netbase.h>
+#include <util.h>
+#include <utilstrencodings.h>
 
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/predicate.hpp>
@@ -26,6 +22,11 @@
 #include <event2/event.h>
 #include <event2/thread.h>
 #include <event2/util.h>
+
+#include <cstdlib>
+#include <deque>
+#include <set>
+#include <vector>
 
 /** Default control port */
 const std::string DEFAULT_TOR_CONTROL = "127.0.0.1:9051";
@@ -139,7 +140,7 @@ TorControlConnection::~TorControlConnection() {
 }
 
 void TorControlConnection::readcb(struct bufferevent *bev, void *ctx) {
-    TorControlConnection *self = (TorControlConnection *)ctx;
+    TorControlConnection *self = static_cast<TorControlConnection *>(ctx);
     struct evbuffer *input = bufferevent_get_input(bev);
     size_t n_read_out = 0;
     char *line;
@@ -190,7 +191,7 @@ void TorControlConnection::readcb(struct bufferevent *bev, void *ctx) {
 
 void TorControlConnection::eventcb(struct bufferevent *bev, short what,
                                    void *ctx) {
-    TorControlConnection *self = (TorControlConnection *)ctx;
+    TorControlConnection *self = static_cast<TorControlConnection *>(ctx);
     if (what & BEV_EVENT_CONNECTED) {
         LogPrint(BCLog::TOR, "tor: Successfully connected!\n");
         self->connected(*self);
@@ -520,8 +521,8 @@ void TorController::auth_cb(TorControlConnection &_conn,
         if (gArgs.GetArg("-onion", "") == "") {
             CService resolved(LookupNumeric("127.0.0.1", 9050));
             proxyType addrOnion = proxyType(resolved, true);
-            SetProxy(NET_TOR, addrOnion);
-            SetLimited(NET_TOR, false);
+            SetProxy(NET_ONION, addrOnion);
+            SetLimited(NET_ONION, false);
         }
 
         // Finally - now create the service
@@ -766,7 +767,7 @@ fs::path TorController::GetPrivateKeyFile() {
 }
 
 void TorController::reconnect_cb(evutil_socket_t fd, short what, void *arg) {
-    TorController *self = (TorController *)arg;
+    TorController *self = static_cast<TorController *>(arg);
     self->Reconnect();
 }
 

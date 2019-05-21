@@ -2,8 +2,6 @@
 
 project(bitcoin-bench)
 
-include_directories(.)
-
 add_executable(bitcoin-bench
 	EXCLUDE_FROM_ALL
 	base58.cpp
@@ -14,6 +12,7 @@ add_executable(bitcoin-bench
 #	checkblock.cpp TODO Fix including bench/data/*.raw files
 	checkqueue.cpp
 	crypto_hash.cpp
+	gcs_filter.cpp
 	Examples.cpp
 	lockedpool.cpp
 	mempool_eviction.cpp

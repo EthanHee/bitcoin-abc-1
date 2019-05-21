@@ -2,15 +2,17 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "policy/policy.h"
-#include "reverse_iterator.h"
-#include "txmempool.h"
-#include "util.h"
+#include <txmempool.h>
 
-#include "test/test_bitcoin.h"
+#include <policy/policy.h>
+#include <reverse_iterator.h>
+#include <util.h>
+
+#include <test/test_bitcoin.h>
+
+#include <boost/test/unit_test.hpp>
 
 #include <algorithm>
-#include <boost/test/unit_test.hpp>
 #include <list>
 #include <vector>
 
@@ -333,6 +335,7 @@ BOOST_AUTO_TEST_CASE(MempoolIndexingTest) {
     sortedOrder[2] = tx1.GetId().ToString(); // 10000
     sortedOrder[3] = tx4.GetId().ToString(); // 15000
     sortedOrder[4] = tx2.GetId().ToString(); // 20000
+    LOCK(pool.cs);
     CheckSort<descendant_score>(pool, sortedOrder, "MempoolIndexingTest1");
 
     /* low fee but with high fee child */
@@ -560,6 +563,7 @@ BOOST_AUTO_TEST_CASE(MempoolAncestorIndexingTest) {
     }
     sortedOrder[4] = tx3.GetId().ToString(); // 0
 
+    LOCK(pool.cs);
     CheckSort<ancestor_score>(pool, sortedOrder,
                               "MempoolAncestorIndexingTest1");
 

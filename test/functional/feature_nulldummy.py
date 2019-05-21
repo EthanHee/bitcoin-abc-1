@@ -3,13 +3,14 @@
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import *
-from test_framework.messages import FromHex, ToHex
-from test_framework.mininode import CTransaction, network_thread_start
-from test_framework.blocktools import create_coinbase, create_block
-from test_framework.script import CScript
 import time
+
+from test_framework.blocktools import create_block, create_coinbase
+from test_framework.messages import CTransaction, FromHex, ToHex
+from test_framework.mininode import network_thread_start
+from test_framework.script import CScript
+from test_framework.test_framework import BitcoinTestFramework
+from test_framework.util import assert_equal, assert_raises_rpc_error
 
 NULLDUMMY_ERROR = "64: non-mandatory-script-verify-flag (Dummy CHECKMULTISIG argument must be zero)"
 
@@ -48,14 +49,17 @@ class NULLDUMMYTest(BitcoinTestFramework):
 
     def run_test(self):
         self.address = self.nodes[0].getnewaddress()
-        self.ms_address = self.nodes[0].addmultisigaddress(1, [self.address])
+        self.ms_address = self.nodes[0].addmultisigaddress(1, [self.address])[
+            'address']
 
         network_thread_start()
-        self.coinbase_blocks = self.nodes[0].generate(2)  # Block 2
+        # Block 2
+        self.coinbase_blocks = self.nodes[0].generate(2)
         coinbase_txid = []
         for i in self.coinbase_blocks:
             coinbase_txid.append(self.nodes[0].getblock(i)['tx'][0])
-        self.nodes[0].generate(427)  # Block 429
+        # Block 429
+        self.nodes[0].generate(427)
         self.lastblockhash = self.nodes[0].getbestblockhash()
         self.tip = int("0x" + self.lastblockhash, 0)
         self.lastblockheight = 429
@@ -87,7 +91,7 @@ class NULLDUMMYTest(BitcoinTestFramework):
         inputs = [{"txid": txid, "vout": 0}]
         outputs = {to_address: amount}
         rawtx = node.createrawtransaction(inputs, outputs)
-        signresult = node.signrawtransaction(rawtx)
+        signresult = node.signrawtransactionwithwallet(rawtx)
         return FromHex(CTransaction(), signresult['hex'])
 
     def block_submit(self, node, txs, accept=False):

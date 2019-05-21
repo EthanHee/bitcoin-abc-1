@@ -6,19 +6,19 @@
 #ifndef BITCOIN_WALLET_DB_H
 #define BITCOIN_WALLET_DB_H
 
-#include "clientversion.h"
-#include "fs.h"
-#include "serialize.h"
-#include "streams.h"
-#include "sync.h"
-#include "version.h"
+#include <clientversion.h>
+#include <fs.h>
+#include <serialize.h>
+#include <streams.h>
+#include <sync.h>
+#include <version.h>
+
+#include <db_cxx.h>
 
 #include <atomic>
 #include <map>
 #include <string>
 #include <vector>
-
-#include <db_cxx.h>
 
 static const unsigned int DEFAULT_WALLET_DBLOGSIZE = 100;
 static const bool DEFAULT_WALLET_PRIVDB = true;
@@ -53,7 +53,7 @@ public:
      * This must be called BEFORE strFile is opened.
      * Returns true if strFile is OK.
      */
-    enum VerifyResult { VERIFY_OK, RECOVER_OK, RECOVER_FAIL };
+    enum class VerifyResult { VERIFY_OK, RECOVER_OK, RECOVER_FAIL };
     typedef bool (*recoverFunc_type)(const std::string &strFile,
                                      std::string &out_backup_filename);
     VerifyResult Verify(const std::string &strFile,
@@ -72,7 +72,7 @@ public:
     bool Salvage(const std::string &strFile, bool fAggressive,
                  std::vector<KeyValPair> &vResult);
 
-    bool Open(const fs::path &path);
+    bool Open(const fs::path &path, bool retry = 0);
     void Close();
     void Flush(bool fShutdown);
     void CheckpointLSN(const std::string &strFile);
@@ -158,6 +158,9 @@ public:
                  bool fFlushOnCloseIn = true);
     ~CDB() { Close(); }
 
+    CDB(const CDB &) = delete;
+    CDB &operator=(const CDB &) = delete;
+
     void Flush();
     void Close();
     static bool Recover(const std::string &filename, void *callbackDataIn,
@@ -179,10 +182,6 @@ public:
                                    std::string &warningStr,
                                    std::string &errorStr,
                                    CDBEnv::recoverFunc_type recoverFunc);
-
-private:
-    CDB(const CDB &);
-    void operator=(const CDB &);
 
 public:
     template <typename K, typename T> bool Read(const K &key, T &value) {

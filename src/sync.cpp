@@ -2,10 +2,10 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "sync.h"
+#include <sync.h>
 
-#include "logging.h"
-#include "utilstrencodings.h"
+#include <logging.h>
+#include <utilstrencodings.h>
 
 #include <cstdio>
 #include <map>
@@ -23,8 +23,8 @@ void PrintLockContention(const char *pszName, const char *pszFile, int nLine) {
 //
 // Early deadlock detection.
 // Problem being solved:
-//    Thread 1 locks  A, then B, then C
-//    Thread 2 locks  D, then C, then A
+//    Thread 1 locks A, then B, then C
+//    Thread 2 locks D, then C, then A
 //     --> may result in deadlock between the two threads, depending on when
 //     they run.
 // Solution implemented here:

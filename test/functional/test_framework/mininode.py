@@ -6,7 +6,7 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Bitcoin P2P network half-a-node.
 
-This python code was modified from ArtForz' public domain  half-a-node, as
+This python code was modified from ArtForz' public domain half-a-node, as
 found in the mini-node branch of http://github.com/jgarzik/pynode.
 
 P2PConnection: A low-level connection object to a node's P2P interface
@@ -20,7 +20,33 @@ import struct
 import sys
 import threading
 
-from test_framework.messages import *
+from test_framework.messages import (
+    MIN_VERSION_SUPPORTED,
+    msg_addr,
+    msg_block,
+    msg_blocktxn,
+    msg_cmpctblock,
+    msg_feefilter,
+    msg_getaddr,
+    msg_getblocks,
+    msg_getblocktxn,
+    msg_getdata,
+    msg_getheaders,
+    msg_headers,
+    msg_inv,
+    msg_mempool,
+    msg_ping,
+    msg_pong,
+    msg_reject,
+    msg_sendcmpct,
+    msg_sendheaders,
+    msg_tx,
+    msg_verack,
+    msg_version,
+    NODE_NETWORK,
+    READ_BUFFER_SIZE,
+    sha256,
+)
 from test_framework.util import wait_until
 
 logger = logging.getLogger("TestFramework.mininode")
@@ -87,8 +113,8 @@ class P2PConnection(asyncore.dispatcher):
         self.network = net
         self.disconnect = False
 
-        logger.info('Connecting to Bitcoin Node: %s:%d' %
-                    (self.dstaddr, self.dstport))
+        logger.info('Connecting to Bitcoin Node: {}:{}'.format(
+            self.dstaddr, self.dstport))
 
         try:
             self.connect((dstaddr, dstport))
@@ -105,15 +131,15 @@ class P2PConnection(asyncore.dispatcher):
     def handle_connect(self):
         """asyncore callback when a connection is opened."""
         if self.state != "connected":
-            logger.debug("Connected & Listening: %s:%d" %
-                         (self.dstaddr, self.dstport))
+            logger.debug("Connected & Listening: {}:{}".format(
+                self.dstaddr, self.dstport))
             self.state = "connected"
             self.on_open()
 
     def handle_close(self):
         """asyncore callback when a connection is closed."""
-        logger.debug("Closing connection to: %s:%d" %
-                     (self.dstaddr, self.dstport))
+        logger.debug("Closing connection to: {}:{}".format(
+            self.dstaddr, self.dstport))
         self.state = "closed"
         self.recvbuf = b""
         self.sendbuf = b""
@@ -156,7 +182,8 @@ class P2PConnection(asyncore.dispatcher):
                 if len(self.recvbuf) < 4:
                     return None
                 if self.recvbuf[:4] != MAGIC_BYTES[self.network]:
-                    raise ValueError("got garbage %s" % repr(self.recvbuf))
+                    raise ValueError(
+                        "got garbage {}".format(repr(self.recvbuf)))
                 if len(self.recvbuf) < 4 + 12 + 4 + 4:
                     return
                 command = self.recvbuf[4:4+12].split(b"\x00", 1)[0]
@@ -170,7 +197,7 @@ class P2PConnection(asyncore.dispatcher):
                     raise ValueError("got bad checksum " + repr(self.recvbuf))
                 self.recvbuf = self.recvbuf[4+12+4+4+msglen:]
                 if command not in MESSAGEMAP:
-                    raise ValueError("Received unknown command from %s:%d: '%s' %s" % (
+                    raise ValueError("Received unknown command from {}:{}: '{}' {}".format(
                         self.dstaddr, self.dstport, command, repr(msg)))
                 f = BytesIO(msg)
                 m = MESSAGEMAP[command]()
@@ -261,8 +288,8 @@ class P2PConnection(asyncore.dispatcher):
             log_message = "Send message to "
         elif direction == "receive":
             log_message = "Received message from "
-        log_message += "%s:%d: %s" % (self.dstaddr,
-                                      self.dstport, repr(msg)[:500])
+        log_message += "{}:{}: {}".format(
+            self.dstaddr, self.dstport, repr(msg)[:500])
         if len(log_message) > 500:
             log_message += "... (msg truncated)"
         logger.debug(log_message)
@@ -319,8 +346,8 @@ class P2PInterface(P2PConnection):
                 self.last_message[command] = message
                 getattr(self, 'on_' + command)(message)
             except:
-                print("ERROR delivering %s (%s)" % (repr(message),
-                                                    sys.exc_info()[0]))
+                print("ERROR delivering {} ({})".format(
+                    repr(message), sys.exc_info()[0]))
                 raise
 
     # Callback methods. Can be overridden by subclasses in individual test

@@ -2,14 +2,14 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "bloom.h"
+#include <bloom.h>
 
-#include "hash.h"
-#include "primitives/transaction.h"
-#include "random.h"
-#include "script/script.h"
-#include "script/standard.h"
-#include "streams.h"
+#include <hash.h>
+#include <primitives/transaction.h>
+#include <random.h>
+#include <script/script.h>
+#include <script/standard.h>
+#include <streams.h>
 
 #include <cmath>
 #include <cstdlib>
@@ -264,8 +264,8 @@ void CRollingBloomFilter::insert(const std::vector<uint8_t> &vKey) {
         if (nGeneration == 4) {
             nGeneration = 1;
         }
-        uint64_t nGenerationMask1 = -uint64_t(nGeneration & 1);
-        uint64_t nGenerationMask2 = -uint64_t(nGeneration >> 1);
+        uint64_t nGenerationMask1 = 0 - uint64_t(nGeneration & 1);
+        uint64_t nGenerationMask2 = 0 - uint64_t(nGeneration >> 1);
         /* Wipe old entries that used this generation number. */
         for (uint32_t p = 0; p < data.size(); p += 2) {
             uint64_t p1 = data[p], p2 = data[p + 1];

@@ -7,7 +7,7 @@
 import os
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import (assert_equal, assert_raises_rpc_error)
+from test_framework.util import assert_equal, assert_raises_rpc_error
 
 
 def read_dump(file_name, addrs, script_addrs, hd_master_addr_old):
@@ -95,7 +95,7 @@ class WalletDumpTest(BitcoinTestFramework):
 
         # Test scripts dump by adding a 1-of-1 multisig address
         multisig_addr = self.nodes[0].addmultisigaddress(
-            1, [addrs[0]["address"]])
+            1, [addrs[0]["address"]])["address"]
 
         # dump unencrypted wallet
         result = self.nodes[0].dumpwallet(

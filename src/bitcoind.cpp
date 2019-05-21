@@ -4,24 +4,22 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #if defined(HAVE_CONFIG_H)
-#include "config/bitcoin-config.h"
+#include <config/bitcoin-config.h>
 #endif
 
-#include "chainparams.h"
-#include "clientversion.h"
-#include "compat.h"
-#include "config.h"
-#include "fs.h"
-#include "httprpc.h"
-#include "httpserver.h"
-#include "init.h"
-#include "noui.h"
-#include "rpc/server.h"
-#include "util.h"
-#include "utilstrencodings.h"
-#include "walletinitinterface.h"
-
-#include <boost/thread.hpp>
+#include <chainparams.h>
+#include <clientversion.h>
+#include <compat.h>
+#include <config.h>
+#include <fs.h>
+#include <httprpc.h>
+#include <httpserver.h>
+#include <init.h>
+#include <noui.h>
+#include <rpc/server.h>
+#include <util.h>
+#include <utilstrencodings.h>
+#include <walletinitinterface.h>
 
 #include <cstdio>
 
@@ -87,7 +85,7 @@ bool AppInit(int argc, char *argv[]) {
                         "  bitcoind [options]                     " +
                         strprintf(_("Start %s Daemon"), _(PACKAGE_NAME)) + "\n";
 
-            strUsage += "\n" + HelpMessage(HMM_BITCOIND);
+            strUsage += "\n" + HelpMessage(HelpMessageMode::BITCOIND);
         }
 
         fprintf(stdout, "%s", strUsage.c_str());
@@ -124,7 +122,7 @@ bool AppInit(int argc, char *argv[]) {
                         "Error: Command line contains unexpected token '%s', "
                         "see bitcoind -h for a list of options.\n",
                         argv[i]);
-                exit(EXIT_FAILURE);
+                return false;
             }
         }
 
@@ -137,20 +135,24 @@ bool AppInit(int argc, char *argv[]) {
         if (!AppInitBasicSetup()) {
             // InitError will have been called with detailed error, which ends
             // up on console
-            exit(1);
+            return false;
         }
         if (!AppInitParameterInteraction(config, rpcServer)) {
             // InitError will have been called with detailed error, which ends
             // up on console
-            exit(1);
+            return false;
         }
         if (!AppInitSanityChecks()) {
             // InitError will have been called with detailed error, which ends
             // up on console
-            exit(1);
+            return false;
         }
         if (gArgs.GetBoolArg("-daemon", false)) {
 #if HAVE_DECL_DAEMON
+#if defined(MAC_OSX)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
             fprintf(stdout, "Bitcoin server starting\n");
 
             // Daemonize
@@ -160,6 +162,9 @@ bool AppInit(int argc, char *argv[]) {
                         strerror(errno));
                 return false;
             }
+#if defined(MAC_OSX)
+#pragma GCC diagnostic pop
+#endif
 #else
             fprintf(
                 stderr,
@@ -171,7 +176,7 @@ bool AppInit(int argc, char *argv[]) {
         // Lock data directory after daemonization
         if (!AppInitLockDataDirectory()) {
             // If locking the data directory failed, exit immediately
-            exit(EXIT_FAILURE);
+            return false;
         }
         fRet = AppInitMain(config, httpRPCRequestProcessor);
     } catch (const std::exception &e) {

@@ -2,18 +2,18 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "core_io.h"
+#include <core_io.h>
 
-#include "dstencode.h"
-#include "primitives/transaction.h"
-#include "script/script.h"
-#include "script/sigencoding.h"
-#include "script/standard.h"
-#include "serialize.h"
-#include "streams.h"
-#include "util.h"
-#include "utilmoneystr.h"
-#include "utilstrencodings.h"
+#include <dstencode.h>
+#include <primitives/transaction.h>
+#include <script/script.h>
+#include <script/sigencoding.h>
+#include <script/standard.h>
+#include <serialize.h>
+#include <streams.h>
+#include <util.h>
+#include <utilmoneystr.h>
+#include <utilstrencodings.h>
 
 #include <univalue.h>
 
@@ -152,8 +152,8 @@ std::string ScriptToAsmStr(const CScript &script,
     return str;
 }
 
-std::string EncodeHexTx(const CTransaction &tx, const int serialFlags) {
-    CDataStream ssTx(SER_NETWORK, PROTOCOL_VERSION | serialFlags);
+std::string EncodeHexTx(const CTransaction &tx, const int serializeFlags) {
+    CDataStream ssTx(SER_NETWORK, PROTOCOL_VERSION | serializeFlags);
     ssTx << tx;
     return HexStr(ssTx.begin(), ssTx.end());
 }
@@ -184,8 +184,8 @@ void ScriptPubKeyToUniv(const CScript &scriptPubKey, UniValue &out,
     out.pushKV("addresses", a);
 }
 
-void TxToUniv(const CTransaction &tx, const uint256 &hashBlock,
-              UniValue &entry) {
+void TxToUniv(const CTransaction &tx, const uint256 &hashBlock, UniValue &entry,
+              bool include_hex, int serialize_flags) {
     entry.pushKV("txid", tx.GetId().GetHex());
     entry.pushKV("hash", tx.GetHash().GetHex());
     entry.pushKV("version", tx.nVersion);
@@ -238,7 +238,9 @@ void TxToUniv(const CTransaction &tx, const uint256 &hashBlock,
         entry.pushKV("blockhash", hashBlock.GetHex());
     }
 
-    // the hex-encoded transaction. used the name "hex" to be consistent with
-    // the verbose output of "getrawtransaction".
-    entry.pushKV("hex", EncodeHexTx(tx));
+    if (include_hex) {
+        // the hex-encoded transaction. used the name "hex" to be consistent
+        // with the verbose output of "getrawtransaction".
+        entry.pushKV("hex", EncodeHexTx(tx, serialize_flags));
+    }
 }

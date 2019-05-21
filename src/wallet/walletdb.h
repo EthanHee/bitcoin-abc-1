@@ -7,11 +7,11 @@
 #ifndef BITCOIN_WALLET_WALLETDB_H
 #define BITCOIN_WALLET_WALLETDB_H
 
-#include "amount.h"
-#include "key.h"
-#include "primitives/transaction.h"
-#include "script/standard.h" // for CTxDestination
-#include "wallet/db.h"
+#include <amount.h>
+#include <key.h>
+#include <primitives/transaction.h>
+#include <script/standard.h> // for CTxDestination
+#include <wallet/db.h>
 
 #include <cstdint>
 #include <list>
@@ -51,13 +51,13 @@ class uint160;
 class uint256;
 
 /** Error statuses for the wallet database */
-enum DBErrors {
-    DB_LOAD_OK,
-    DB_CORRUPT,
-    DB_NONCRITICAL_ERROR,
-    DB_TOO_NEW,
-    DB_LOAD_FAIL,
-    DB_NEED_REWRITE
+enum class DBErrors {
+    LOAD_OK,
+    CORRUPT,
+    NONCRITICAL_ERROR,
+    TOO_NEW,
+    LOAD_FAIL,
+    NEED_REWRITE
 };
 
 /* simple HD chain data model */
@@ -162,6 +162,8 @@ public:
     explicit CWalletDB(CWalletDBWrapper &dbw, const char *pszMode = "r+",
                        bool _fFlushOnClose = true)
         : batch(dbw, pszMode, _fFlushOnClose), m_dbw(dbw) {}
+    CWalletDB(const CWalletDB &) = delete;
+    CWalletDB &operator=(const CWalletDB &) = delete;
 
     bool WriteName(const CTxDestination &address, const std::string &strName);
     bool EraseName(const CTxDestination &address);
@@ -265,9 +267,6 @@ public:
 private:
     CDB batch;
     CWalletDBWrapper &m_dbw;
-
-    CWalletDB(const CWalletDB &);
-    void operator=(const CWalletDB &);
 };
 
 //! Compacts BDB state so that wallet.dat is self-contained (if there are

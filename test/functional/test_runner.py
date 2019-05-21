@@ -104,8 +104,8 @@ class TestCase():
         log_stdout = tempfile.SpooledTemporaryFile(max_size=2**16)
         log_stderr = tempfile.SpooledTemporaryFile(max_size=2**16)
         test_argv = t.split()
-        tmpdir = [os.path.join("--tmpdir=%s", "%s_%s") %
-                  (self.tmpdir, re.sub(".py$", "", t), portseed)]
+        tmpdir = [os.path.join("--tmpdir={}", "{}_{}").format(
+                  self.tmpdir, re.sub(".py$", "", t), portseed)]
         name = t
         time0 = time.time()
         process = subprocess.Popen([os.path.join(self.tests_dir, test_argv[0])] + test_argv[1:] + self.flags + portseed_arg + tmpdir,
@@ -178,18 +178,18 @@ def main():
     # Create a set to store arguments and create the passon string
     tests = set(arg for arg in unknown_args if arg[:2] != "--")
     passon_args = [arg for arg in unknown_args if arg[:2] == "--"]
-    passon_args.append("--configfile=%s" % configfile)
+    passon_args.append("--configfile={}".format(configfile))
 
     # Set up logging
     logging_level = logging.INFO if args.quiet else logging.DEBUG
     logging.basicConfig(format='%(message)s', level=logging_level)
 
     # Create base test directory
-    tmpdir = os.path.join("%s", "bitcoin_test_runner_%s") % (
-        args.tmpdirprefix, datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+    tmpdir = os.path.join("{}", "bitcoin_test_runner_{:%Y%m%d_%H%M%S}").format(
+        args.tmpdirprefix, datetime.datetime.now())
     os.makedirs(tmpdir)
 
-    logging.debug("Temporary test directory at %s" % tmpdir)
+    logging.debug("Temporary test directory at {}".format(tmpdir))
 
     enable_wallet = config["components"].getboolean("ENABLE_WALLET")
     enable_utils = config["components"].getboolean("ENABLE_UTILS")
@@ -225,7 +225,18 @@ def main():
         # extension.
         test_list = [t for t in all_scripts if
                      (t in tests or re.sub(".py$", "", t) in tests)]
-        cutoff = sys.maxsize  # do not cut off explicitly specified tests
+
+        # Allow for wildcard at the end of the name, so a single input can
+        # match multiple tests
+        for test in tests:
+            if test.endswith('*'):
+                test_list.extend(
+                    [t for t in all_scripts if t.startswith(test[:-1])])
+        # Make the list unique
+        test_list = list(set(test_list))
+
+        # do not cut off explicitly specified tests
+        cutoff = sys.maxsize
     else:
         # No individual tests have been specified.
         # Run all tests that do not exceed
@@ -280,7 +291,7 @@ def run_tests(test_list, build_dir, tests_dir, junitouput, exeext, tmpdir, num_j
     try:
         pidofOutput = subprocess.check_output(["pidof", "bitcoind"])
         if pidofOutput is not None and pidofOutput != b'':
-            print("%sWARNING!%s There is already a bitcoind process running on this system. Tests may fail unexpectedly due to resource contention!" % (
+            print("{}WARNING!{} There is already a bitcoind process running on this system. Tests may fail unexpectedly due to resource contention!".format(
                 BOLD[1], BOLD[0]))
     except (OSError, subprocess.SubprocessError):
         pass
@@ -288,7 +299,7 @@ def run_tests(test_list, build_dir, tests_dir, junitouput, exeext, tmpdir, num_j
     # Warn if there is a cache directory
     cache_dir = os.path.join(build_dir, "test", "cache")
     if os.path.isdir(cache_dir):
-        print("%sWARNING!%s There is a cache directory here: %s. If tests fail unexpectedly, try deleting the cache directory." % (
+        print("{}WARNING!{} There is a cache directory here: {}. If tests fail unexpectedly, try deleting the cache directory.".format(
             BOLD[1], BOLD[0], cache_dir))
 
     # Set env vars
@@ -299,12 +310,13 @@ def run_tests(test_list, build_dir, tests_dir, junitouput, exeext, tmpdir, num_j
             build_dir, 'src', 'bitcoin-cli' + exeext)
 
     flags = [os.path.join("--srcdir={}".format(build_dir), "src")] + args
-    flags.append("--cachedir=%s" % cache_dir)
+    flags.append("--cachedir={}".format(cache_dir))
 
     if enable_coverage:
         coverage = RPCCoverage()
         flags.append(coverage.flag)
-        logging.debug("Initializing coverage directory at %s" % coverage.dir)
+        logging.debug(
+            "Initializing coverage directory at {}".format(coverage.dir))
     else:
         coverage = None
 
@@ -312,7 +324,7 @@ def run_tests(test_list, build_dir, tests_dir, junitouput, exeext, tmpdir, num_j
         # Populate cache
         try:
             subprocess.check_output(
-                [os.path.join(tests_dir, 'create_cache.py')] + flags + [os.path.join("--tmpdir=%s", "cache") % tmpdir])
+                [os.path.join(tests_dir, 'create_cache.py')] + flags + [os.path.join("--tmpdir={}", "cache") .format(tmpdir)])
         except Exception as e:
             print(e.output)
             raise e
@@ -376,14 +388,14 @@ def execute_test_processes(num_jobs, test_list, tests_dir, tmpdir, flags):
             test_results.append(test_result)
 
             if test_result.status == "Passed":
-                print("%s%s%s passed, Duration: %s s" % (
+                print("{}{}{} passed, Duration: {} s".format(
                     BOLD[1], test_result.name, BOLD[0], test_result.time))
             elif test_result.status == "Skipped":
-                print("%s%s%s skipped" %
-                      (BOLD[1], test_result.name, BOLD[0]))
+                print("{}{}{} skipped".format(
+                    BOLD[1], test_result.name, BOLD[0]))
             else:
-                print("%s%s%s failed, Duration: %s s\n" %
-                      (BOLD[1], test_result.name, BOLD[0], test_result.time))
+                print("{}{}{} failed, Duration: {} s\n".format(
+                    BOLD[1], test_result.name, BOLD[0], test_result.time))
                 print(BOLD[1] + 'stdout:' + BOLD[0])
                 print(test_result.stdout)
                 print(BOLD[1] + 'stderr:' + BOLD[0])
@@ -472,7 +484,7 @@ def execute_test_processes(num_jobs, test_list, tests_dir, tmpdir, flags):
 
 
 def print_results(test_results, max_len_name, runtime):
-    results = "\n" + BOLD[1] + "%s | %s | %s\n\n" % (
+    results = "\n" + BOLD[1] + "{} | {} | {}\n\n".format(
         "TEST".ljust(max_len_name), "STATUS   ", "DURATION") + BOLD[0]
 
     test_results.sort(key=lambda result: result.name.lower())
@@ -486,9 +498,9 @@ def print_results(test_results, max_len_name, runtime):
         results += str(test_result)
 
     status = TICK + "Passed" if all_passed else CROSS + "Failed"
-    results += BOLD[1] + "\n%s | %s | %s s (accumulated) \n" % (
+    results += BOLD[1] + "\n{} | {} | {} s (accumulated) \n".format(
         "ALL".ljust(max_len_name), status.ljust(9), time_sum) + BOLD[0]
-    results += "Runtime: %s s\n" % (runtime)
+    results += "Runtime: {} s\n".format(runtime)
     print(results)
 
 
@@ -516,7 +528,8 @@ class TestResult():
             color = GREY
             glyph = CIRCLE
 
-        return color[1] + "%s | %s%s | %s s\n" % (self.name.ljust(self.padding), glyph, self.status.ljust(7), self.time) + color[0]
+        return color[1] + "{} | {}{} | {} s\n".format(
+            self.name.ljust(self.padding), glyph, self.status.ljust(7), self.time) + color[0]
 
     @property
     def was_successful(self):

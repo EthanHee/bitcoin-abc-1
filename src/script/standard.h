@@ -6,10 +6,10 @@
 #ifndef BITCOIN_SCRIPT_STANDARD_H
 #define BITCOIN_SCRIPT_STANDARD_H
 
-#include "amount.h"
-#include "pubkey.h"
-#include "script/script_flags.h"
-#include "uint256.h"
+#include <amount.h>
+#include <pubkey.h>
+#include <script/script_flags.h>
+#include <uint256.h>
 
 #include <boost/variant.hpp>
 
@@ -34,9 +34,7 @@ extern bool fAcceptDatacarrier;
 
 /**
  * Mandatory script verification flags that all new blocks must comply with for
- * them to be valid. (but old blocks may not comply with) Currently just P2SH,
- * but in the future other flags may be added, such as a soft-fork to enforce
- * strict DER encoding.
+ * them to be valid (but old blocks may not comply with).
  *
  * Failing one of these tests may trigger a DoS ban - see CheckInputs() for
  * details.

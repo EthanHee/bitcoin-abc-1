@@ -2,12 +2,13 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "scheduler.h"
+#include <scheduler.h>
 
-#include "random.h"
-#include "reverselock.h"
+#include <random.h>
+#include <reverselock.h>
 
 #include <boost/bind.hpp>
+
 #include <cassert>
 #include <utility>
 
@@ -130,6 +131,7 @@ CScheduler::getQueueInfo(boost::chrono::system_clock::time_point &first,
 }
 
 bool CScheduler::AreThreadsServicingQueue() const {
+    boost::unique_lock<boost::mutex> lock(newTaskMutex);
     return nThreadsServicingQueue;
 }
 
@@ -196,4 +198,9 @@ void SingleThreadedSchedulerClient::EmptyQueue() {
         LOCK(m_cs_callbacks_pending);
         should_continue = !m_callbacks_pending.empty();
     }
+}
+
+size_t SingleThreadedSchedulerClient::CallbacksPending() {
+    LOCK(m_cs_callbacks_pending);
+    return m_callbacks_pending.size();
 }

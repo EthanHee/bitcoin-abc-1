@@ -4,27 +4,27 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #if defined(HAVE_CONFIG_H)
-#include "config/bitcoin-config.h"
+#include <config/bitcoin-config.h>
 #endif
 
-#include "net.h"
+#include <net.h>
 
-#include "addrman.h"
-#include "chainparams.h"
-#include "clientversion.h"
-#include "config.h"
-#include "consensus/consensus.h"
-#include "crypto/common.h"
-#include "crypto/sha256.h"
-#include "hash.h"
-#include "netbase.h"
-#include "primitives/transaction.h"
-#include "scheduler.h"
-#include "ui_interface.h"
-#include "utilstrencodings.h"
+#include <addrman.h>
+#include <chainparams.h>
+#include <clientversion.h>
+#include <config.h>
+#include <consensus/consensus.h>
+#include <crypto/common.h>
+#include <crypto/sha256.h>
+#include <hash.h>
+#include <netbase.h>
+#include <primitives/transaction.h>
+#include <scheduler.h>
+#include <ui_interface.h>
+#include <utilstrencodings.h>
 
 #ifdef WIN32
-#include <string.h>
+#include <cstring>
 #else
 #include <fcntl.h>
 #endif
@@ -2109,7 +2109,8 @@ void CConnman::OpenNetworkConnection(const CAddress &addrConnect,
         return;
     }
     if (!pszDest) {
-        if (IsLocal(addrConnect) || FindNode((CNetAddr)addrConnect) ||
+        if (IsLocal(addrConnect) ||
+            FindNode(static_cast<CNetAddr>(addrConnect)) ||
             IsBanned(addrConnect) || FindNode(addrConnect.ToStringIPPort())) {
             return;
         }
@@ -2400,10 +2401,16 @@ bool CConnman::InitBinds(const std::vector<CService> &binds,
 bool CConnman::Start(CScheduler &scheduler, const Options &connOptions) {
     Init(connOptions);
 
-    nTotalBytesRecv = 0;
-    nTotalBytesSent = 0;
-    nMaxOutboundTotalBytesSentInCycle = 0;
-    nMaxOutboundCycleStartTime = 0;
+    {
+        LOCK(cs_totalBytesRecv);
+        nTotalBytesRecv = 0;
+    }
+    {
+        LOCK(cs_totalBytesSent);
+        nTotalBytesSent = 0;
+        nMaxOutboundTotalBytesSentInCycle = 0;
+        nMaxOutboundCycleStartTime = 0;
+    }
 
     if (fListen && !InitBinds(connOptions.vBinds, connOptions.vWhiteBinds)) {
         if (clientInterface) {
@@ -2467,12 +2474,12 @@ bool CConnman::Start(CScheduler &scheduler, const Options &connOptions) {
 
     if (semOutbound == nullptr) {
         // initialize semaphore
-        semOutbound = MakeUnique<CSemaphore>(
+        semOutbound = std::make_unique<CSemaphore>(
             std::min((nMaxOutbound + nMaxFeeler), nMaxConnections));
     }
     if (semAddnode == nullptr) {
         // initialize semaphore
-        semAddnode = MakeUnique<CSemaphore>(nMaxAddnode);
+        semAddnode = std::make_unique<CSemaphore>(nMaxAddnode);
     }
 
     //
@@ -2896,7 +2903,7 @@ CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn,
     nNextInvSend = 0;
     fRelayTxes = false;
     fSentAddr = false;
-    pfilter = MakeUnique<CBloomFilter>();
+    pfilter = std::make_unique<CBloomFilter>();
     timeLastMempoolReq = 0;
     nLastBlockTime = 0;
     nLastTXTime = 0;

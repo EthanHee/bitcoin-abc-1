@@ -16,11 +16,11 @@
 #ifndef BITCOIN_BASE58_H
 #define BITCOIN_BASE58_H
 
-#include "chainparams.h"
-#include "key.h"
-#include "pubkey.h"
-#include "script/standard.h"
-#include "support/allocators/zeroafterfree.h"
+#include <chainparams.h>
+#include <key.h>
+#include <pubkey.h>
+#include <script/standard.h>
+#include <support/allocators/zeroafterfree.h>
 
 #include <string>
 #include <vector>
@@ -134,7 +134,7 @@ public:
         if (vchData.size() == Size) {
             // If base58 encoded data does not hold an ext key, return a
             // !IsValid() key
-            ret.Decode(&vchData[0]);
+            ret.Decode(vchData.data());
         }
         return ret;
     }

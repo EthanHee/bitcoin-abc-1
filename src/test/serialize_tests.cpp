@@ -2,15 +2,18 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "hash.h"
-#include "serialize.h"
-#include "streams.h"
-#include "test/test_bitcoin.h"
+#include <serialize.h>
+
+#include <hash.h>
+#include <streams.h>
+#include <utilstrencodings.h>
+
+#include <test/test_bitcoin.h>
+
+#include <boost/test/unit_test.hpp>
 
 #include <cstdint>
 #include <limits>
-
-#include <boost/test/unit_test.hpp>
 
 BOOST_FIXTURE_TEST_SUITE(serialize_tests, BasicTestingSetup)
 
@@ -55,7 +58,7 @@ public:
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream &s, Operation ser_action) {
-        READWRITEMANY(intval, boolval, stringval, FLATDATA(charstrval), txval);
+        READWRITE(intval, boolval, stringval, FLATDATA(charstrval), txval);
     }
 };
 

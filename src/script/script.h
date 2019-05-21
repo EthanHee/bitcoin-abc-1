@@ -6,9 +6,9 @@
 #ifndef BITCOIN_SCRIPT_SCRIPT_H
 #define BITCOIN_SCRIPT_SCRIPT_H
 
-#include "crypto/common.h"
-#include "prevector.h"
-#include "serialize.h"
+#include <crypto/common.h>
+#include <prevector.h>
+#include <serialize.h>
 
 #include <cassert>
 #include <climits>
@@ -433,7 +433,7 @@ public:
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream &s, Operation ser_action) {
-        READWRITE(static_cast<CScriptBase &>(*this));
+        READWRITEAS(CScriptBase, *this);
     }
 
     CScript &operator+=(const CScript &b) {
@@ -558,7 +558,7 @@ public:
             pc += nSize;
         }
 
-        opcodeRet = (opcodetype)opcode;
+        opcodeRet = static_cast<opcodetype>(opcode);
         return true;
     }
 

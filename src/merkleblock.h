@@ -6,10 +6,10 @@
 #ifndef BITCOIN_MERKLEBLOCK_H
 #define BITCOIN_MERKLEBLOCK_H
 
-#include "bloom.h"
-#include "primitives/block.h"
-#include "serialize.h"
-#include "uint256.h"
+#include <bloom.h>
+#include <primitives/block.h>
+#include <serialize.h>
+#include <uint256.h>
 
 #include <vector>
 
@@ -24,7 +24,7 @@
  * storing a bit for each traversed node, signifying whether the node is the
  * parent of at least one matched leaf txid (or a matched txid itself). In
  * case we are at the leaf level, or this bit is 0, its merkle node hash is
- * stored, and its children are not explorer further. Otherwise, no hash is
+ * stored, and its children are not explored further. Otherwise, no hash is
  * stored, but we recurse into both (or the only) child branch. During
  * decoding, the same depth-first traversal is performed, consuming bits and
  * hashes as they written during encoding.
@@ -148,6 +148,9 @@ public:
  * From the peer-node's perspective, the SPV client is a "filtered node".
  * See BIP37 for details:
  * https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
+ *
+ * NOTE: The class assumes that the given CBlock has *at least* 1 transaction.
+ * If the CBlock has 0 txs, it will hit an assertion.
  */
 class CMerkleBlock {
 public:

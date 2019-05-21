@@ -2,8 +2,9 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "rcu.h"
-#include "sync.h"
+#include <rcu.h>
+
+#include <sync.h>
 
 #include <algorithm>
 #include <chrono>
@@ -182,7 +183,7 @@ void RCUInfos::synchronize() {
     // the thread causing synchronization delay so this thread can be waked up
     // at an apropriate time.
     static std::condition_variable cond;
-    static CWaitableCriticalSection cs;
+    static Mutex cs;
     WAIT_LOCK(cs, lock);
 
     do {

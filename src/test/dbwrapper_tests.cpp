@@ -2,10 +2,12 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "dbwrapper.h"
-#include "random.h"
-#include "test/test_bitcoin.h"
-#include "uint256.h"
+#include <dbwrapper.h>
+
+#include <random.h>
+#include <uint256.h>
+
+#include <test/test_bitcoin.h>
 
 #include <boost/test/unit_test.hpp>
 
@@ -124,7 +126,7 @@ BOOST_AUTO_TEST_CASE(existing_data_no_obfuscate) {
 
     // Set up a non-obfuscated wrapper to write some initial data.
     std::unique_ptr<CDBWrapper> dbw =
-        MakeUnique<CDBWrapper>(ph, (1 << 10), false, false, false);
+        std::make_unique<CDBWrapper>(ph, (1 << 10), false, false, false);
     char key = 'k';
     uint256 in = InsecureRand256();
     uint256 res;
@@ -167,7 +169,7 @@ BOOST_AUTO_TEST_CASE(existing_data_reindex) {
 
     // Set up a non-obfuscated wrapper to write some initial data.
     std::unique_ptr<CDBWrapper> dbw =
-        MakeUnique<CDBWrapper>(ph, (1 << 10), false, false, false);
+        std::make_unique<CDBWrapper>(ph, (1 << 10), false, false, false);
     char key = 'k';
     uint256 in = InsecureRand256();
     uint256 res;
@@ -270,7 +272,7 @@ BOOST_AUTO_TEST_CASE(iterator_string_ordering) {
     CDBWrapper dbw(ph, (1 << 20), true, false, false);
     for (int x = 0x00; x < 10; ++x) {
         for (int y = 0; y < 10; y++) {
-            sprintf(buf, "%d", x);
+            snprintf(buf, sizeof(buf), "%d", x);
             StringContentsSerializer key(buf);
             for (int z = 0; z < y; z++)
                 key += key;
@@ -282,12 +284,12 @@ BOOST_AUTO_TEST_CASE(iterator_string_ordering) {
     std::unique_ptr<CDBIterator> it(
         const_cast<CDBWrapper &>(dbw).NewIterator());
     for (int seek_start : {0, 5}) {
-        sprintf(buf, "%d", seek_start);
+        snprintf(buf, sizeof(buf), "%d", seek_start);
         StringContentsSerializer seek_key(buf);
         it->Seek(seek_key);
         for (int x = seek_start; x < 10; ++x) {
             for (int y = 0; y < 10; y++) {
-                sprintf(buf, "%d", x);
+                snprintf(buf, sizeof(buf), "%d", x);
                 std::string exp_key(buf);
                 for (int z = 0; z < y; z++)
                     exp_key += exp_key;

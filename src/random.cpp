@@ -3,23 +3,26 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "random.h"
+#include <random.h>
 
-#include "crypto/sha512.h"
-#include "support/cleanse.h"
 #ifdef WIN32
-#include "compat.h" // for Windows API
+#include <compat.h> // for Windows API
 #include <wincrypt.h>
 #endif
-#include "logging.h"  // for LogPrint()
-#include "sync.h"     // for WAIT_LOCK
-#include "utiltime.h" // for GetTime()
+#include <crypto/sha512.h>
+#include <logging.h> // for LogPrint()
+#include <support/cleanse.h>
+#include <sync.h>     // for WAIT_LOCK
+#include <utiltime.h> // for GetTime()
+
+#include <openssl/err.h>
+#include <openssl/rand.h>
 
 #include <chrono>
 #include <cstdlib>
 #include <limits>
+#include <mutex>
 #include <thread>
-
 #ifndef WIN32
 #include <fcntl.h>
 #include <sys/time.h>
@@ -38,16 +41,12 @@
 #endif
 #ifdef HAVE_SYSCTL_ARND
 #include <sys/sysctl.h>
+#include <utilstrencodings.h> // for ARRAYLEN
 #endif
-
-#include <mutex>
 
 #if defined(__x86_64__) || defined(__amd64__) || defined(__i386__)
 #include <cpuid.h>
 #endif
-
-#include <openssl/err.h>
-#include <openssl/rand.h>
 
 [[noreturn]] static void RandFailure() {
     LogPrintf("Failed to read randomness, aborting\n");
@@ -308,7 +307,7 @@ void RandAddSeedSleep() {
     memory_cleanse(&nPerfCounter2, sizeof(nPerfCounter2));
 }
 
-static CWaitableCriticalSection cs_rng_state;
+static Mutex cs_rng_state;
 static uint8_t rng_state[32] = {0};
 static uint64_t rng_counter = 0;
 

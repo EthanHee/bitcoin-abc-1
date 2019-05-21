@@ -6,15 +6,16 @@
 #ifndef BITCOIN_CHAIN_H
 #define BITCOIN_CHAIN_H
 
-#include "arith_uint256.h"
-#include "blockstatus.h"
-#include "blockvalidity.h"
-#include "consensus/params.h"
-#include "diskblockpos.h"
-#include "pow.h"
-#include "primitives/block.h"
-#include "tinyformat.h"
-#include "uint256.h"
+#include <arith_uint256.h>
+#include <blockstatus.h>
+#include <blockvalidity.h>
+#include <consensus/params.h>
+#include <diskblockpos.h>
+#include <pow.h>
+#include <primitives/block.h>
+#include <sync.h>
+#include <tinyformat.h>
+#include <uint256.h>
 
 #include <unordered_map>
 #include <vector>
@@ -96,7 +97,7 @@ public:
     //! (memory only) block header metadata
     uint64_t nTimeReceived;
 
-    //! (memory only) Maximum nTime in the chain upto and including this block.
+    //! (memory only) Maximum nTime in the chain up to and including this block.
     unsigned int nTimeMax;
 
     void SetNull() {
@@ -239,7 +240,14 @@ struct BlockHasher {
 };
 
 typedef std::unordered_map<uint256, CBlockIndex *, BlockHasher> BlockMap;
-extern BlockMap mapBlockIndex;
+extern BlockMap &mapBlockIndex;
+extern CCriticalSection cs_main;
+
+inline CBlockIndex *LookupBlockIndex(const uint256 &hash) {
+    AssertLockHeld(cs_main);
+    BlockMap::const_iterator it = mapBlockIndex.find(hash);
+    return it == mapBlockIndex.end() ? nullptr : it->second;
+}
 
 arith_uint256 GetBlockProof(const CBlockIndex &block);
 
